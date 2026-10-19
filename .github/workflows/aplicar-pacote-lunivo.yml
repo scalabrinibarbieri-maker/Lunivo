@@ -1,0 +1,203 @@
+name: Aplicar pacote Lunivo
+
+# Envie um ZIP com nome pacote-*.zip para a RAIZ do repositório, branch main.
+# O ZIP contém caminhos relativos à raiz (por exemplo, src/app/index.tsx).
+# Para excluir arquivos, inclua _remover.txt com um caminho por linha.
+# Não é permitido atualizar .github/ por ZIP. O workflow é instalado separadamente.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'pacote-*.zip'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lunivo-aplicar-pacote-main
+  cancel-in-progress: false
+
+jobs:
+  aplicar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Obter código
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Descobrir novos pacotes
+        id: pacotes
+        shell: bash
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = workflow_dispatch ] || [ -z "${BEFORE//0/}" ] || ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            git ls-files -- 'pacote-*.zip' > /tmp/lunivo-pacotes.txt
+          else
+            git diff --name-only --diff-filter=AM "$BEFORE" "$AFTER" -- 'pacote-*.zip' > /tmp/lunivo-pacotes.txt
+          fi
+          if [ -s /tmp/lunivo-pacotes.txt ]; then
+            echo 'existem=sim' >> "$GITHUB_OUTPUT"
+            cat /tmp/lunivo-pacotes.txt
+          else
+            echo 'existem=nao' >> "$GITHUB_OUTPUT"
+            echo 'Nenhum pacote novo.'
+          fi
+
+      - name: Salvar cópia do código anterior
+        if: steps.pacotes.outputs.existem == 'sim'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git archive --format=tar HEAD | gzip -n > /tmp/lunivo-codigo-anterior.tar.gz
+          sha256sum /tmp/lunivo-codigo-anterior.tar.gz
+
+      - name: Guardar cópia anterior no GitHub
+        if: steps.pacotes.outputs.existem == 'sim'
+        uses: actions/upload-artifact@v4
+        with:
+          name: codigo-anterior-${{ github.run_id }}
+          path: /tmp/lunivo-codigo-anterior.tar.gz
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Conferir segurança e aplicar ZIP
+        if: steps.pacotes.outputs.existem == 'sim'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYTHON'
+          import os, re, stat, sys, zipfile
+          from pathlib import Path
+
+          ROOT = Path.cwd().resolve()
+          MAX_FILES = 4000
+          MAX_UNPACKED = 60 * 1024 * 1024
+          IGNORABLE = re.compile(r'(^|/)(__MACOSX/|\.DS_Store$|Thumbs\.db$)')
+          PACK_NAME = re.compile(r'^pacote-[a-zA-Z0-9._-]+\.zip$')
+          ARCHIVE_NAMES = [l.strip() for l in Path('/tmp/lunivo-pacotes.txt').read_text().splitlines() if l.strip()]
+          plans=[]
+
+          def secure_path(name):
+              if not name or '\\' in name or name.startswith('/') or re.match(r'^[a-zA-Z]:', name):
+                  raise ValueError(f'Caminho absoluto ou inválido: {name!r}')
+              parts=name.split('/')
+              if any(p in ('', '.', '..') for p in parts):
+                  raise ValueError(f'Caminho inseguro: {name!r}')
+              if parts[0].lower() in {'.github','.git','node_modules','.expo','dist','build'}:
+                  raise ValueError(f'Diretório protegido: {name!r}')
+              if any(p in {'.env','.env.local','.env.production'} or p.endswith(('.jks','.keystore','.p8','.pem','.key','.mobileprovision')) for p in parts):
+                  raise ValueError(f'Arquivo potencialmente secreto: {name!r}')
+              if name.lower().startswith('pacote-') and name.lower().endswith('.zip'):
+                  raise ValueError('Pacotes ZIP não podem conter outros pacotes ZIP')
+              dest=(ROOT/name).resolve()
+              if not dest.is_relative_to(ROOT):
+                  raise ValueError(f'Fora do repositório: {name!r}')
+              return dest
+
+          for pack in ARCHIVE_NAMES:
+              if '/' in pack or not PACK_NAME.fullmatch(pack):
+                  raise ValueError(f'Pacote deve estar na raiz e ter nome pacote-*.zip: {pack}')
+              if not Path(pack).is_file():
+                  raise FileNotFoundError(f'Pacote não encontrado: {pack}')
+              writes, removes, count, total, seen = [], [], 0, 0, set()
+              with zipfile.ZipFile(pack) as z:
+                  for info in z.infolist():
+                      if IGNORABLE.search(info.filename) or info.is_dir():
+                          continue
+                      name=info.filename
+                      dest=secure_path(name)
+                      key=name.casefold()
+                      if key in seen:
+                          raise ValueError(f'Nome duplicado no ZIP: {name}')
+                      seen.add(key)
+                      mode=(info.external_attr >> 16) & 0o170000
+                      if mode and mode != stat.S_IFREG:
+                          raise ValueError(f'Link ou arquivo especial proibido: {name}')
+                      if info.flag_bits & 0x1:
+                          raise ValueError(f'Arquivo ZIP criptografado: {name}')
+                      count+=1
+                      total+=info.file_size
+                      if count > MAX_FILES or total > MAX_UNPACKED:
+                          raise ValueError(f'Pacote ultrapassa limite de {MAX_FILES} arquivos ou {MAX_UNPACKED} bytes')
+                      if name == '_remover.txt':
+                          for raw in z.read(info).decode('utf-8').splitlines():
+                              target=raw.strip()
+                              if not target or target.startswith('#'): continue
+                              secure_path(target)
+                              if target in {'package.json','app.json','eas.json'}:
+                                  raise ValueError(f'Não pode excluir arquivo fundamental: {target}')
+                              removes.append(target)
+                      else:
+                          writes.append((name,z.read(info)))
+              overlap={n for n,_ in writes}.intersection(removes)
+              if overlap:
+                  raise ValueError(f'Arquivo escrito e removido no mesmo pacote: {sorted(overlap)}')
+              plans.append((pack,writes,removes))
+              print(f'Pacote válido: {pack} ({len(writes)} arquivos, {len(removes)} exclusões)')
+
+          if not plans: raise ValueError('Nenhum pacote para processar')
+          # Só modifica o checkout APÓS todos os pacotes passarem na inspeção.
+          for pack,writes,removes in plans:
+              for name,data in writes:
+                  dest=secure_path(name)
+                  dest.parent.mkdir(parents=True,exist_ok=True)
+                  dest.write_bytes(data)
+                  print('GRAVADO',name)
+              for name in removes:
+                  dest=secure_path(name)
+                  if dest.is_file() or dest.is_symlink():
+                      dest.unlink()
+                      print('REMOVIDO',name)
+              Path(pack).unlink()
+              print('PROCESSADO',pack)
+          for critical in ('package.json','app.json','eas.json'):
+              if not (ROOT/critical).is_file():
+                  raise ValueError(f'Após aplicação falta arquivo fundamental: {critical}')
+          PYTHON
+
+      - name: Preparar Node.js
+        if: steps.pacotes.outputs.existem == 'sim'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Instalar dependências e verificar o aplicativo
+        if: steps.pacotes.outputs.existem == 'sim'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f package-lock.json ]; then
+            npm ci --no-audit --no-fund
+          else
+            # Apenas na primeira execução: cria o lockfile para builds reproduzíveis.
+            npm install --package-lock-only --no-audit --no-fund
+            npm ci --no-audit --no-fund
+          fi
+          npm run typecheck
+          npm test
+
+      - name: Registrar alterações verificadas
+        if: steps.pacotes.outputs.existem == 'sim'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'Nenhuma mudança para registrar.'
+            exit 0
+          fi
+          git diff --cached --name-status
+          git commit -m 'Aplicar pacote Lunivo validado'
+          git push origin HEAD:main
+          echo 'Atualização aplicada e salva no histórico do Git.'
