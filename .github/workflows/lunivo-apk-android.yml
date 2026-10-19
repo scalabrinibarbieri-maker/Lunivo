@@ -1,4 +1,4 @@
-name: Lunivo - APK Android assinado
+name: Lunivo - Android otimizado (APK e AAB)
 
 # Build Android feito no GitHub Actions com a mesma chave JKS exportada do Expo.
 # Nenhuma credencial deve ser inserida no codigo-fonte nem em arquivos ZIP.
@@ -82,6 +82,32 @@ jobs:
       - name: Gerar projeto Android nativo
         run: npx expo prebuild --platform android --clean --no-install
 
+      - name: Ativar R8 e remocao de recursos nao usados
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Expo SDK 57 gera build.gradle consultando estas propriedades.
+          grep -Fq 'android.enableMinifyInReleaseBuilds' android/app/build.gradle || {
+            echo '::error::Gradle nao reconhece a chave de minificacao; revisar template Expo.'
+            exit 1
+          }
+          grep -Fq 'android.enableShrinkResourcesInReleaseBuilds' android/app/build.gradle || {
+            echo '::error::Gradle nao reconhece a chave de shrink de recursos; revisar template Expo.'
+            exit 1
+          }
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          p = Path('android/gradle.properties')
+          if not p.exists():
+              raise SystemExit('gradle.properties ausente')
+          keys = {'android.enableMinifyInReleaseBuilds', 'android.enableShrinkResourcesInReleaseBuilds'}
+          lines = [line for line in p.read_text().splitlines() if line.split('=', 1)[0].strip() not in keys]
+          for key in sorted(keys):
+              lines.append(f'{key}=true')
+          p.write_text('\n'.join(lines) + '\n')
+          print('R8 ativado e remocao de recursos ativada (release)')
+          PYTHON
+
       - name: Restaurar JKS original do Expo
         shell: bash
         env:
@@ -127,15 +153,15 @@ jobs:
           }
           GRADLE
 
-      - name: Compilar APK release assinado
+      - name: Compilar APK e AAB release assinados
         working-directory: android
         env:
           LUNIVO_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.LUNIVO_ANDROID_KEYSTORE_PASSWORD }}
           LUNIVO_ANDROID_KEY_ALIAS: ${{ secrets.LUNIVO_ANDROID_KEY_ALIAS }}
           LUNIVO_ANDROID_KEY_PASSWORD: ${{ secrets.LUNIVO_ANDROID_KEY_PASSWORD }}
-        run: ./gradlew :app:assembleRelease --no-daemon --build-cache
+        run: ./gradlew :app:assembleRelease :app:bundleRelease --no-daemon --build-cache
 
-      - name: Conferir arquivo gerado
+      - name: Conferir assinaturas dos arquivos gerados
         shell: bash
         run: |
           set -euo pipefail
@@ -145,11 +171,92 @@ jobs:
           signer="$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -type f -name apksigner -print | sort -V | tail -n 1)"
           test -x "$signer"
           "$signer" verify --print-certs "$apk"
+          aab="$(find android/app/build/outputs/bundle/release -maxdepth 1 -type f -name '*.aab' -print -quit)"
+          test -n "$aab" && test -s "$aab"
+          jarsigner -verify "$aab" | tail -n 8
+
+      - name: Criar relatorio de tamanho Android
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYTHON'
+          import json, zipfile, hashlib, os
+          from pathlib import Path
+          from collections import defaultdict
+
+          apk = next(Path('android/app/build/outputs/apk/release').glob('*.apk'))
+          aab = next(Path('android/app/build/outputs/bundle/release').glob('*.aab'))
+          categories = defaultdict(lambda: [0, 0])
+          abis = defaultdict(lambda: [0, 0])
+          def category(name):
+              if name.startswith('lib/'): return 'Bibliotecas nativas (.so)'
+              if name.startswith('assets/'): return 'Assets / bundle JavaScript'
+              if name.startswith('res/'): return 'Recursos Android (res/)'
+              if name.endswith('.dex') or name.startswith('classes'): return 'Codigo Android (.dex)'
+              if name.startswith('META-INF/'): return 'Metadados de assinatura'
+              return 'Outros'
+          with zipfile.ZipFile(apk) as z:
+              for item in z.infolist():
+                  if item.is_dir(): continue
+                  group = categories[category(item.filename)]
+                  group[0] += item.compress_size
+                  group[1] += item.file_size
+                  if item.filename.startswith('lib/'):
+                      parts = item.filename.split('/')
+                      if len(parts) > 2:
+                          abi = abis[parts[1]]
+                          abi[0] += item.compress_size
+                          abi[1] += item.file_size
+          mib = lambda n: f'{n / (1024 * 1024):.2f} MiB'
+          table = ['# Lunivo - relatorio do pacote Android', '',
+                   f'- APK universal: **{mib(apk.stat().st_size)}**',
+                   f'- AAB de distribuicao: **{mib(aab.stat().st_size)}**',
+                   '- Compilacao: release, com R8 e shrinkResources habilitados',
+                   '- O tamanho do AAB **nao representa** o tamanho de download da Google Play.',
+                   '- O tamanho de download final depende das variantes otimizadas por aparelho.', '',
+                   '## Conteudo do APK', '',
+                   '| Categoria | Compactado dentro do APK | Descompactado |',
+                   '|---|---:|---:|']
+          for cat, values in sorted(categories.items(), key=lambda x: -x[1][0]):
+              table.append(f'| {cat} | {mib(values[0])} | {mib(values[1])} |')
+          table += ['', '## Bibliotecas por arquitetura', '',
+                    '| Arquitetura | Compactado | Descompactado |',
+                    '|---|---:|---:|']
+          for abi, values in sorted(abis.items(), key=lambda x: -x[1][0]):
+              table.append(f'| {abi} | {mib(values[0])} | {mib(values[1])} |')
+          report = '\n'.join(table) + '\n'
+          Path('lunivo-size-report.md').write_text(report)
+          Path('lunivo-size-report.json').write_text(json.dumps({
+              'apk_bytes': apk.stat().st_size, 'aab_bytes': aab.stat().st_size,
+              'apk_sha256': hashlib.sha256(apk.read_bytes()).hexdigest(),
+              'categories': dict(categories), 'abis': dict(abis),
+          }, indent=2))
+          print(report)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f: f.write(report)
+          PYTHON
 
       - name: Publicar APK para download por 14 dias
         uses: actions/upload-artifact@v4
         with:
           name: lunivo-android-apk-${{ github.run_number }}
           path: android/app/build/outputs/apk/release/*.apk
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Publicar AAB para testes de distribuicao
+        uses: actions/upload-artifact@v4
+        with:
+          name: lunivo-android-aab-${{ github.run_number }}
+          path: android/app/build/outputs/bundle/release/*.aab
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Publicar relatorio de tamanhos
+        uses: actions/upload-artifact@v4
+        with:
+          name: lunivo-android-relatorio-${{ github.run_number }}
+          path: |
+            lunivo-size-report.md
+            lunivo-size-report.json
           retention-days: 14
           if-no-files-found: error
