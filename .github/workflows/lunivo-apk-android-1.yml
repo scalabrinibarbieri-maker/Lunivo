@@ -1,0 +1,155 @@
+name: Lunivo - APK Android assinado
+
+# Build Android feito no GitHub Actions com a mesma chave JKS exportada do Expo.
+# Nenhuma credencial deve ser inserida no codigo-fonte nem em arquivos ZIP.
+# GitHub Secrets obrigatorios:
+# LUNIVO_ANDROID_KEYSTORE_BASE64
+# LUNIVO_ANDROID_KEYSTORE_PASSWORD
+# LUNIVO_ANDROID_KEY_ALIAS
+# LUNIVO_ANDROID_KEY_PASSWORD
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows:
+      - Aplicar pacote Lunivo
+    types: [completed]
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/lunivo-apk-android.yml'
+      - 'src/**'
+      - 'assets/**'
+      - 'app.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'tests/**'
+      - 'babel.config.*'
+      - 'metro.config.*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lunivo-android-build-main
+  cancel-in-progress: false
+
+jobs:
+  android:
+    if: >-
+      ${{ github.event_name != 'workflow_run' ||
+          (github.event.workflow_run.conclusion == 'success' &&
+           github.event.workflow_run.head_branch == 'main') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+    steps:
+      - name: Obter a ultima versao aprovada
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Preparar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Preparar SDK Android
+        uses: android-actions/setup-android@v3
+
+      - name: Preparar cache do Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Instalar dependencias verificadas
+        run: npm ci --no-audit --no-fund
+
+      - name: Executar testes e checagem de tipos
+        run: |
+          npm run typecheck
+          npm test
+
+      - name: Gerar projeto Android nativo
+        run: npx expo prebuild --platform android --clean --no-install
+
+      - name: Restaurar JKS original do Expo
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.LUNIVO_ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.LUNIVO_ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.LUNIVO_ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.LUNIVO_ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for var in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [ -z "${!var}" ]; then
+              echo "::error::Falta o segredo ${var} no GitHub Actions"
+              exit 1
+            fi
+          done
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/lunivo-signing.jks"
+          test -s "$RUNNER_TEMP/lunivo-signing.jks"
+          chmod 600 "$RUNNER_TEMP/lunivo-signing.jks"
+          echo "LUNIVO_KEYSTORE_PATH=$RUNNER_TEMP/lunivo-signing.jks" >> "$GITHUB_ENV"
+
+      - name: Configurar assinatura no Gradle gerado
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f android/app/build.gradle
+          cat >> android/app/build.gradle <<'GRADLE'
+
+          // Configuracao de assinatura Lunivo (injetada apenas durante o build CI)
+          android {
+              signingConfigs {
+                  lunivoRelease {
+                      storeFile file(System.getenv("LUNIVO_KEYSTORE_PATH"))
+                      storePassword System.getenv("LUNIVO_ANDROID_KEYSTORE_PASSWORD")
+                      keyAlias System.getenv("LUNIVO_ANDROID_KEY_ALIAS")
+                      keyPassword System.getenv("LUNIVO_ANDROID_KEY_PASSWORD")
+                  }
+              }
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.lunivoRelease
+                  }
+              }
+          }
+          GRADLE
+
+      - name: Compilar APK release assinado
+        working-directory: android
+        env:
+          LUNIVO_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.LUNIVO_ANDROID_KEYSTORE_PASSWORD }}
+          LUNIVO_ANDROID_KEY_ALIAS: ${{ secrets.LUNIVO_ANDROID_KEY_ALIAS }}
+          LUNIVO_ANDROID_KEY_PASSWORD: ${{ secrets.LUNIVO_ANDROID_KEY_PASSWORD }}
+        run: ./gradlew :app:assembleRelease --no-daemon --build-cache
+
+      - name: Conferir arquivo gerado
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$(find android/app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          ls -lh android/app/build/outputs/apk/release/*.apk
+          apk="$(find android/app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          signer="$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -type f -name apksigner -print | sort -V | tail -n 1)"
+          test -x "$signer"
+          "$signer" verify --print-certs "$apk"
+
+      - name: Publicar APK para download por 14 dias
+        uses: actions/upload-artifact@v4
+        with:
+          name: lunivo-android-apk-${{ github.run_number }}
+          path: android/app/build/outputs/apk/release/*.apk
+          retention-days: 14
+          if-no-files-found: error
