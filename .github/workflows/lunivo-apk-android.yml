@@ -1,0 +1,108 @@
+name: Lunivo - APK Android
+
+# Compila um APK Android nativo de teste no GitHub (sem EAS Build).
+# Disparo: manual; ao receber um commit direto em arquivos do app;
+# ou depois do workflow "Aplicar pacote Lunivo" terminar com sucesso.
+# O ultimo caso e essencial: commits feitos pelo GITHUB_TOKEN do aplicador
+# nao geram outro evento push para GitHub Actions.
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows:
+      - Aplicar pacote Lunivo
+    types:
+      - completed
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/lunivo-apk-android.yml'
+      - 'src/**'
+      - 'assets/**'
+      - 'app.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'tests/**'
+      - 'babel.config.*'
+      - 'metro.config.*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lunivo-apk-android-main
+  cancel-in-progress: false
+
+jobs:
+  android-apk:
+    # Nao compilar apos um aplicador que falhou.
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+
+    steps:
+      - name: Obter codigo aprovado da main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Configurar Java para compilacao Android
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Preparar SDK Android
+        uses: android-actions/setup-android@v3
+
+      - name: Cache do Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Instalar dependencias bloqueadas
+        run: npm ci --no-audit --no-fund
+
+      - name: Verificar tipos e testes
+        run: |
+          npm run typecheck
+          npm test
+
+      - name: Gerar o projeto Android nativo
+        run: npx expo prebuild --platform android --clean --no-install
+
+      - name: Compilar APK Android independente do Metro
+        working-directory: android
+        run: ./gradlew :app:assembleRelease --no-daemon --build-cache --stacktrace
+
+      - name: Confirmar arquivo APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          find android/app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print
+          test -n "$(find android/app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print -quit)"
+
+      - name: Disponibilizar APK para download (14 dias)
+        uses: actions/upload-artifact@v4
+        with:
+          name: lunivo-android-apk-teste-${{ github.run_number }}
+          path: android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+# ATENCAO: o APK de teste usa a assinatura de desenvolvimento do template
+# Android, e NAO a chave de producao gerenciada pelo EAS/Play Store.
+# Para atualizar um APK assinado com outra chave, sera necessario desinstalar
+# a versao anterior. Antes da loja configuraremos assinatura estavel e segura.
