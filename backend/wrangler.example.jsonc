@@ -1,0 +1,18 @@
+{
+  // Copie como wrangler.jsonc APÓS criar sua conta Cloudflare e o banco D1.
+  // Substitua o UUID abaixo pelo database_id real. Não rode deploy com o valor de exemplo.
+  "name": "lunivo-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-19",
+  "vars": {
+    "FIREBASE_PROJECT_ID": "SUBSTITUA_PELO_PROJECT_ID_REAL"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "lunivo-dev",
+      "database_id": "SUBSTITUA_PELO_DATABASE_ID_REAL",
+      "migrations_dir": "migrations"
+    }
+  ]
+}
