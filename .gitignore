@@ -12,3 +12,5 @@ coverage/
 *.mobileprovision
 *.log
 .DS_Store
+
+credentials.json
