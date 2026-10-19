@@ -1,12 +1,11 @@
 name: Lunivo - Android otimizado (APK e AAB)
 
-# Build Android feito no GitHub Actions com a mesma chave JKS exportada do Expo.
-# Nenhuma credencial deve ser inserida no codigo-fonte nem em arquivos ZIP.
-# GitHub Secrets obrigatorios:
-# LUNIVO_ANDROID_KEYSTORE_BASE64
-# LUNIVO_ANDROID_KEYSTORE_PASSWORD
-# LUNIVO_ANDROID_KEY_ALIAS
-# LUNIVO_ANDROID_KEY_PASSWORD
+# APK/AAB so quando necessario. ZIPs que mudam apenas backend/docs nao
+# disparam a compilacao do Android. Mudancas na parte mobile continuam
+# gerando APK e AAB ate configurarmos uma rotina OTA com Expo Updates.
+# Segredos existentes: LUNIVO_ANDROID_KEYSTORE_BASE64,
+# LUNIVO_ANDROID_KEYSTORE_PASSWORD, LUNIVO_ANDROID_KEY_ALIAS,
+# LUNIVO_ANDROID_KEY_PASSWORD.
 
 on:
   workflow_dispatch:
@@ -17,10 +16,14 @@ on:
   push:
     branches: [main]
     paths:
-      - '.github/workflows/lunivo-apk-android.yml'
       - 'src/**'
       - 'assets/**'
+      - 'android/**'
+      - 'ios/**'
+      - 'plugins/**'
       - 'app.json'
+      - 'app.config.*'
+      - 'eas.json'
       - 'package.json'
       - 'package-lock.json'
       - 'tsconfig.json'
@@ -36,18 +39,82 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  android:
+  decidir:
+    name: Identificar alteracoes (sem compilar Android)
     if: >-
       ${{ github.event_name != 'workflow_run' ||
           (github.event.workflow_run.conclusion == 'success' &&
            github.event.workflow_run.head_branch == 'main') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      compilar: ${{ steps.analise.outputs.compilar }}
+    steps:
+      - name: Obter codigo e historico
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Decidir se o Android precisa ser recompilado
+        id: analise
+        shell: bash
+        env:
+          ORIGEM: ${{ github.event_name }}
+          SHA_ANTES_DO_PACOTE: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$ORIGEM" != 'workflow_run' ]; then
+            echo 'compilar=true' >> "$GITHUB_OUTPUT"
+            echo 'Evento manual ou alteracao direta no codigo mobile: compilar.'
+            exit 0
+          fi
+          if [ -z "${SHA_ANTES_DO_PACOTE:-}" ] || \
+             ! git cat-file -e "${SHA_ANTES_DO_PACOTE}^{commit}" 2>/dev/null || \
+             ! git merge-base --is-ancestor "$SHA_ANTES_DO_PACOTE" HEAD; then
+            # Seguranca: se nao conseguimos provar que a mudanca era so do backend,
+            # compilamos o Android em vez de ignorar uma alteracao relevante.
+            echo '::warning::Nao foi possivel determinar as alteracoes. Compilacao conservadora.'
+            echo 'compilar=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git diff --name-only -z "$SHA_ANTES_DO_PACOTE" HEAD > /tmp/lunivo-arquivos-modificados
+          python3 - <<'PYTHON'
+          import os
+          from pathlib import Path
+
+          paths = [p.decode('utf-8') for p in Path('/tmp/lunivo-arquivos-modificados').read_bytes().split(b'\0') if p]
+          def nao_exige_android(path: str) -> bool:
+              return (
+                  path.startswith(('backend/', 'docs/')) or
+                  (path.startswith('pacote-') and path.endswith('.zip') and '/' not in path) or
+                  path in {'README.md', '.gitignore', 'LICENSE', '.editorconfig'}
+              )
+          relevantes = [p for p in paths if not nao_exige_android(p)]
+          compilar = bool(relevantes)
+          print('Arquivos modificados:', paths or '(nenhum)')
+          print('Arquivos que exigem novo Android:', relevantes or '(nenhum)')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"compilar={'true' if compilar else 'false'}\n")
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write('# Lunivo - decisao de compilacao Android\n\n')
+              f.write('**Resultado:** ' + ('Compilar APK e AAB' if compilar else 'Nao compilar: somente backend/docs') + '\n\n')
+              f.write('Arquivos analisados:\n\n')
+              f.write(''.join('- `' + p.replace('`', '') + '`\n' for p in paths) if paths else '(nenhuma alteracao)\n')
+          PYTHON
+
+  android:
+    name: Android assinado (somente quando necessario)
+    needs: decidir
+    if: ${{ needs.decidir.outputs.compilar == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
       CI: '1'
       EXPO_NO_TELEMETRY: '1'
     steps:
-      - name: Obter a ultima versao aprovada
+      - name: Obter ultima versao aprovada
         uses: actions/checkout@v4
         with:
           ref: main
@@ -86,26 +153,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Expo SDK 57 gera build.gradle consultando estas propriedades.
-          grep -Fq 'android.enableMinifyInReleaseBuilds' android/app/build.gradle || {
-            echo '::error::Gradle nao reconhece a chave de minificacao; revisar template Expo.'
-            exit 1
-          }
-          grep -Fq 'android.enableShrinkResourcesInReleaseBuilds' android/app/build.gradle || {
-            echo '::error::Gradle nao reconhece a chave de shrink de recursos; revisar template Expo.'
-            exit 1
-          }
+          grep -Fq 'android.enableMinifyInReleaseBuilds' android/app/build.gradle
+          grep -Fq 'android.enableShrinkResourcesInReleaseBuilds' android/app/build.gradle
           python3 - <<'PYTHON'
           from pathlib import Path
           p = Path('android/gradle.properties')
-          if not p.exists():
-              raise SystemExit('gradle.properties ausente')
           keys = {'android.enableMinifyInReleaseBuilds', 'android.enableShrinkResourcesInReleaseBuilds'}
           lines = [line for line in p.read_text().splitlines() if line.split('=', 1)[0].strip() not in keys]
           for key in sorted(keys):
               lines.append(f'{key}=true')
           p.write_text('\n'.join(lines) + '\n')
-          print('R8 ativado e remocao de recursos ativada (release)')
+          print('R8 e shrinkResources ativados')
           PYTHON
 
       - name: Restaurar JKS original do Expo
@@ -119,7 +177,7 @@ jobs:
           set -euo pipefail
           for var in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
             if [ -z "${!var}" ]; then
-              echo "::error::Falta o segredo ${var} no GitHub Actions"
+              echo "::error::Falta um dos segredos de assinatura: ${var}"
               exit 1
             fi
           done
@@ -135,7 +193,7 @@ jobs:
           test -f android/app/build.gradle
           cat >> android/app/build.gradle <<'GRADLE'
 
-          // Configuracao de assinatura Lunivo (injetada apenas durante o build CI)
+          // Assinatura Lunivo, injetada apenas durante o build CI.
           android {
               signingConfigs {
                   lunivoRelease {
@@ -165,9 +223,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$(find android/app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print -quit)"
-          ls -lh android/app/build/outputs/apk/release/*.apk
           apk="$(find android/app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          test -n "$apk" && test -s "$apk"
+          ls -lh "$apk"
           signer="$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -type f -name apksigner -print | sort -V | tail -n 1)"
           test -x "$signer"
           "$signer" verify --print-certs "$apk"
@@ -212,16 +270,13 @@ jobs:
                    f'- APK universal: **{mib(apk.stat().st_size)}**',
                    f'- AAB de distribuicao: **{mib(aab.stat().st_size)}**',
                    '- Compilacao: release, com R8 e shrinkResources habilitados',
-                   '- O tamanho do AAB **nao representa** o tamanho de download da Google Play.',
-                   '- O tamanho de download final depende das variantes otimizadas por aparelho.', '',
-                   '## Conteudo do APK', '',
-                   '| Categoria | Compactado dentro do APK | Descompactado |',
-                   '|---|---:|---:|']
+                   '- O tamanho do AAB nao representa o tamanho de download da Google Play.',
+                   '', '## Conteudo do APK', '',
+                   '| Categoria | Compactado | Descompactado |', '|---|---:|---:|']
           for cat, values in sorted(categories.items(), key=lambda x: -x[1][0]):
               table.append(f'| {cat} | {mib(values[0])} | {mib(values[1])} |')
           table += ['', '## Bibliotecas por arquitetura', '',
-                    '| Arquitetura | Compactado | Descompactado |',
-                    '|---|---:|---:|']
+                    '| Arquitetura | Compactado | Descompactado |', '|---|---:|---:|']
           for abi, values in sorted(abis.items(), key=lambda x: -x[1][0]):
               table.append(f'| {abi} | {mib(values[0])} | {mib(values[1])} |')
           report = '\n'.join(table) + '\n'
