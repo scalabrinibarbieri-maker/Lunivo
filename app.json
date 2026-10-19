@@ -26,7 +26,12 @@
       "typedRoutes": false
     },
     "extra": {
-      "productStage": "foundation"
-    }
+      "productStage": "foundation",
+      "router": {},
+      "eas": {
+        "projectId": "1de059f0-f569-43fd-9579-9d058bf0e4e4"
+      }
+    },
+    "owner": "lunivos-team"
   }
 }
