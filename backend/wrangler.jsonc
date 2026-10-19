@@ -1,0 +1,14 @@
+{
+  "name": "lunivo-api-dev",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-19",
+  "workers_dev": true,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "lunivo-dev",
+      "database_id": "6b335307-9f33-4b3e-8f59-1d0db5cca1b7",
+      "migrations_dir": "migrations"
+    }
+  ]
+}
