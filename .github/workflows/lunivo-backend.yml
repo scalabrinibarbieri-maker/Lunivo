@@ -1,0 +1,192 @@
+name: Lunivo - Backend Cloudflare
+
+# O backend e independente das compilacoes Android/iOS.
+# Segredo do repositorio requerido para publicar: CLOUDFLARE_API_TOKEN.
+# O Account ID nao e secreto, mas permanece configurado apenas neste workflow.
+# Implantacao automatica opcional: Actions variable LUNIVO_CF_AUTO_DEPLOY = true.
+# Migracoes do D1 SOMENTE por execucao manual com operacao=migrate.
+
+on:
+  workflow_dispatch:
+    inputs:
+      operacao:
+        description: O que fazer com o backend de testes?
+        required: true
+        type: choice
+        default: validate
+        options:
+          - validate
+          - deploy
+          - migrate
+  workflow_run:
+    workflows:
+      - Aplicar pacote Lunivo
+    types: [completed]
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/lunivo-backend.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lunivo-backend-dev
+  cancel-in-progress: false
+
+jobs:
+  decidir:
+    name: Conferir o que mudou no backend
+    if: >-
+      ${{ github.event_name != 'workflow_run' ||
+          (github.event.workflow_run.conclusion == 'success' &&
+           github.event.workflow_run.head_branch == 'main') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      executar: ${{ steps.verificar.outputs.executar }}
+    steps:
+      - name: Obter codigo atualizado
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Identificar arquivos de backend
+        id: verificar
+        shell: bash
+        env:
+          EVENTO: ${{ github.event_name }}
+          ANTES_PUSH: ${{ github.event.before }}
+          ANTES_PACOTE: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENTO" = workflow_dispatch ]; then
+            echo 'executar=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$EVENTO" = workflow_run ]; then
+            BASE="$ANTES_PACOTE"
+          else
+            BASE="$ANTES_PUSH"
+          fi
+          if [ -z "${BASE:-}" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ] || \
+             ! git cat-file -e "${BASE}^{commit}" 2>/dev/null || \
+             ! git merge-base --is-ancestor "$BASE" HEAD; then
+            echo '::warning::Historico insuficiente: validar backend por seguranca.'
+            echo 'executar=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git diff --name-only -z "$BASE" HEAD > /tmp/lunivo-backend-changes
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          import os
+          changed = [b.decode('utf-8') for b in Path('/tmp/lunivo-backend-changes').read_bytes().split(b'\0') if b]
+          relevant = [p for p in changed if p.startswith('backend/')]
+          decision = 'true' if relevant else 'false'
+          print('Arquivos alterados:', changed or '(nenhum)')
+          print('Backend alterado:', relevant or '(nao)')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f'executar={decision}\n')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write('# Lunivo Cloudflare: verificacao de alteracoes\n\n')
+              f.write('**Executar testes do backend:** ' + decision + '\n')
+          PYTHON
+
+  validar:
+    name: Testes e compilacao do Worker
+    needs: decidir
+    if: ${{ needs.decidir.outputs.executar == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Instalar apenas dependencias do backend
+        run: npm install --no-audit --no-fund --no-package-lock
+      - name: Executar testes e TypeScript
+        run: |
+          npm test
+          npm run typecheck
+      - name: Validar bundle Cloudflare sem publicar
+        run: npx wrangler deploy --dry-run --outdir "$RUNNER_TEMP/lunivo-worker-build"
+
+  publicar:
+    name: Publicar Worker de testes (sem mexer no D1)
+    needs: [decidir, validar]
+    if: >-
+      ${{ needs.decidir.outputs.executar == 'true' &&
+          ( (github.event_name == 'workflow_dispatch' && inputs.operacao == 'deploy') ||
+            (github.event_name != 'workflow_dispatch' && vars.LUNIVO_CF_AUTO_DEPLOY == 'true') ) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_ACCOUNT_ID: de4d3179ca7e143ad3277ac32e681690
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verificar credencial sem revelar o valor
+        shell: bash
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo '::error::Falta o segredo CLOUDFLARE_API_TOKEN em Settings > Secrets and variables > Actions.'
+            exit 1
+          fi
+      - name: Instalar backend
+        run: npm install --no-audit --no-fund --no-package-lock
+      - name: Implantar somente Worker lunivo-api-dev
+        run: npx wrangler deploy
+
+  migrar:
+    name: Aplicar migracoes D1 no banco lunivo-dev (manual)
+    needs: [decidir, validar]
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.operacao == 'migrate' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_ACCOUNT_ID: de4d3179ca7e143ad3277ac32e681690
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verificar credencial sem revelar o valor
+        shell: bash
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo '::error::Falta o segredo CLOUDFLARE_API_TOKEN.'
+            exit 1
+          fi
+      - name: Instalar backend
+        run: npm install --no-audit --no-fund --no-package-lock
+      - name: Aplicar migracoes remotas no D1 de testes
+        env:
+          CI: 'true'
+        run: npx wrangler d1 migrations apply DB --remote
