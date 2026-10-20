@@ -1,6 +1,7 @@
 import type { Lesson } from './types';
 
-// Dados separados do motor: futuramente cursos podem vir de um CMS/API versionada.
+// Os IDs das lições já sincronizadas com o D1 permanecem inalterados.
+// Também preservamos os IDs q01-q14, usados pelo catálogo de áudio anterior.
 export const LESSONS: readonly Lesson[] = [
   {
     id: 'it-a1-01', title: 'Primeiras palavras', subtitle: 'Saudações e cortesia', unit: 1,
@@ -20,7 +21,25 @@ export const LESSONS: readonly Lesson[] = [
         acceptedAnswers: ['grazie'], sampleAnswer: 'Grazie', explanation: '“Grazie” é invariável para quem agradece.' },
       { type: 'choice', id: 'q06', instruction: 'Responda em italiano', prompt: 'Qual palavra significa “sim”?', options: [
         { id: 'a', label: 'No' }, { id: 'b', label: 'Sì' }, { id: 'c', label: 'Ciao' }
-      ], correctOptionId: 'b', explanation: '“Sì” significa sim. “No” significa não.' }
+      ], correctOptionId: 'b', explanation: '“Sì” significa sim. “No” significa não.' },
+      // Novos formatos: usam os mesmos 3 áudios já instalados/publicados.
+      { type: 'listen_choice', id: 'q15', audioExerciseId: 'q01', instruction: 'Compreensão oral',
+        prompt: 'Ouça e escolha o significado da palavra.', options: [
+          { id: 'a', label: 'Obrigado' }, { id: 'b', label: 'Olá' }, { id: 'c', label: 'Boa noite' }
+        ], correctOptionId: 'b', explanation: 'Você ouviu “Ciao”, uma saudação informal.' },
+      { type: 'listen_write', id: 'q16', audioExerciseId: 'q02', instruction: 'Ditado em italiano',
+        prompt: 'Escreva em italiano a palavra que você ouviu.', acceptedAnswers: ['buongiorno'],
+        sampleAnswer: 'Buongiorno', explanation: '“Buongiorno” significa bom dia.' },
+      { type: 'listen_choice', id: 'q18', audioExerciseId: 'q03', instruction: 'Reconheça a fala',
+        prompt: 'Qual palavra italiana foi pronunciada?', options: [
+          { id: 'a', label: 'Grazie' }, { id: 'b', label: 'Ciao' }, { id: 'c', label: 'Buongiorno' }
+        ], correctOptionId: 'a', explanation: 'Você ouviu “Grazie”, que significa obrigado(a).' },
+      { type: 'match', id: 'q17', instruction: 'Associe as expressões',
+        prompt: 'Encontre os pares corretos.', pairs: [
+          { id: 'ciao', left: 'Ciao', right: 'Olá' },
+          { id: 'buongiorno', left: 'Buongiorno', right: 'Bom dia' },
+          { id: 'grazie', left: 'Grazie', right: 'Obrigado(a)' },
+        ], explanation: 'Essas três expressões são usadas diariamente na Itália.' },
     ],
   },
   {

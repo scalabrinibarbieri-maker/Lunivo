@@ -4,16 +4,17 @@ import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { colors } from '../../constants/theme';
 import { AUDIO_CATALOG, clipForExercise, type AudioClipId } from './catalog';
 import { SEED_AUDIO_ASSETS } from './sources';
-import {
-  cloudClipForExercise, readCachedAudioManifest, refreshAudioManifest,
-  type CloudAudioClip,
-} from './remoteCatalog';
+import { cloudClipForExercise, readCachedAudioManifest, refreshAudioManifest, type CloudAudioClip } from './remoteCatalog';
 import { prepareCloudAudio, savedAudioUri } from './remoteCache';
 
-function PlaybackButtons({ text, source }: { text: string; source: number | string }) {
+function PlaybackButtons({ text, source, concealText, onReadyChange }: {
+  text: string; source: number | string;
+  concealText: boolean; onReadyChange?: (ready: boolean) => void;
+}) {
   const player = useAudioPlayer(source);
   const status = useAudioPlayerStatus(player);
   const [error, setError] = useState(false);
+  useEffect(() => { onReadyChange?.(status.isLoaded); }, [status.isLoaded, onReadyChange]);
   const replay = async (speed: number) => {
     if (!status.isLoaded) return;
     try {
@@ -26,15 +27,16 @@ function PlaybackButtons({ text, source }: { text: string; source: number | stri
       setError(true);
     }
   };
+  const label = concealText ? 'a gravação' : text;
   return <View style={styles.container}>
-    <Text style={styles.label}>OUÇA A PRONÚNCIA</Text>
+    <Text style={styles.label}>{concealText ? 'ESCUTE COM ATENÇÃO' : 'OUÇA A PRONÚNCIA'}</Text>
     <View style={styles.controls}>
-      <Pressable accessibilityRole="button" accessibilityLabel={`Ouvir ${text} na velocidade normal`}
+      <Pressable accessibilityRole="button" accessibilityLabel={`Ouvir ${label} na velocidade normal`}
         disabled={!status.isLoaded} onPress={() => { void replay(1); }}
         style={({ pressed }) => [styles.primary, pressed && styles.pressed, !status.isLoaded && styles.waiting]}>
         <Text style={styles.primaryText}>🔊  Ouvir</Text>
       </Pressable>
-      <Pressable accessibilityRole="button" accessibilityLabel={`Ouvir ${text} mais devagar`}
+      <Pressable accessibilityRole="button" accessibilityLabel={`Ouvir ${label} mais devagar`}
         disabled={!status.isLoaded} onPress={() => { void replay(0.8); }}
         style={({ pressed }) => [styles.secondary, pressed && styles.pressed, !status.isLoaded && styles.waiting]}>
         <Text style={styles.secondaryText}>0,8×  Devagar</Text>
@@ -44,7 +46,11 @@ function PlaybackButtons({ text, source }: { text: string; source: number | stri
   </View>;
 }
 
-function CloudAudioControls({ clip }: { clip: CloudAudioClip }) {
+function CloudAudioControls({ clip, concealText, onReadyChange }: {
+  clip: CloudAudioClip;
+  concealText: boolean;
+  onReadyChange?: (ready: boolean) => void;
+}) {
   const [uri, setUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -53,7 +59,6 @@ function CloudAudioControls({ clip }: { clip: CloudAudioClip }) {
     let mounted = true;
     const load = async () => {
       try {
-        // Prioridade ao arquivo já baixado, inclusive quando estiver offline.
         const localUri = await savedAudioUri(clip);
         if (localUri) {
           if (mounted) { setUri(localUri); setLoading(false); setError(false); }
@@ -73,11 +78,15 @@ function CloudAudioControls({ clip }: { clip: CloudAudioClip }) {
     return () => { mounted = false; };
   }, [clip.id, clip.storageKey, clip.sizeBytes]);
 
-  if (uri) return <PlaybackButtons text={clip.text} source={uri} />;
+  if (uri) return <PlaybackButtons text={clip.text} source={uri} concealText={concealText} onReadyChange={onReadyChange} />;
   return <View style={styles.container}>
-    <Text style={styles.label}>OUÇA A PRONÚNCIA</Text>
+    <Text style={styles.label}>ESCUTE A PRONÚNCIA</Text>
     <Pressable accessibilityRole="button" disabled={loading}
-      onPress={() => { setError(false); setLoading(true); void prepareCloudAudio(clip).then(setUri).catch(() => setError(true)).finally(() => setLoading(false)); }}
+      onPress={() => {
+        setError(false);
+        setLoading(true);
+        void prepareCloudAudio(clip).then(setUri).catch(() => setError(true)).finally(() => setLoading(false));
+      }}
       style={[styles.secondary, { minHeight: 49 }, loading && styles.waiting]}>
       <Text style={styles.secondaryText}>{loading ? 'Preparando áudio…' : 'Tentar baixar áudio novamente'}</Text>
     </Pressable>
@@ -85,8 +94,12 @@ function CloudAudioControls({ clip }: { clip: CloudAudioClip }) {
   </View>;
 }
 
-/** Ciao e Buongiorno: assets nativos; todos os outros: manifesto e R2. */
-export function ExercisePronunciation({ exerciseId }: { exerciseId: string }) {
+/** IDs de exercícios com escuta podem apontar para uma gravação já existente (q01/q02/q03). */
+export function ExercisePronunciation({ exerciseId, concealText = false, onReadyChange }: {
+  exerciseId: string;
+  concealText?: boolean;
+  onReadyChange?: (ready: boolean) => void;
+}) {
   const seedId: AudioClipId | null = clipForExercise(exerciseId);
   const [remoteClip, setRemoteClip] = useState<CloudAudioClip | null>(null);
   useEffect(() => {
@@ -104,10 +117,10 @@ export function ExercisePronunciation({ exerciseId }: { exerciseId: string }) {
     return () => { mounted = false; listener.remove(); };
   }, [exerciseId, seedId]);
 
-  if (seedId) {
-    return <PlaybackButtons key={seedId} text={AUDIO_CATALOG[seedId].text} source={SEED_AUDIO_ASSETS[seedId]} />;
-  }
-  return remoteClip ? <CloudAudioControls key={remoteClip.id} clip={remoteClip} /> : null;
+  if (seedId) return <PlaybackButtons key={seedId} text={AUDIO_CATALOG[seedId].text}
+    source={SEED_AUDIO_ASSETS[seedId]} concealText={concealText} onReadyChange={onReadyChange} />;
+  return remoteClip ? <CloudAudioControls key={remoteClip.id} clip={remoteClip}
+    concealText={concealText} onReadyChange={onReadyChange} /> : null;
 }
 
 const styles = StyleSheet.create({
@@ -120,7 +133,6 @@ const styles = StyleSheet.create({
   secondary: { backgroundColor: colors.primarySoft, borderRadius: 15, minHeight: 51, paddingHorizontal: 13,
     alignItems: 'center', justifyContent: 'center', flex: 1 },
   secondaryText: { color: colors.primary, fontWeight: '800', fontSize: 14 },
-  pressed: { opacity: 0.75 },
-  waiting: { opacity: 0.55 },
+  pressed: { opacity: 0.75 }, waiting: { opacity: 0.55 },
   error: { color: colors.red, fontSize: 12, marginTop: 9 },
 });
