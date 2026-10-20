@@ -1,0 +1,10 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import {handleCourseRequest,publishedCourseLessonIds} from '../src/courses.ts';
+import {parseCompletionSync} from '../src/validation.ts';
+const catalog={version:1,units:[{id:'it-a1-u02',revision:1,lessons:[{id:'it-a1-04',title:'Apresentacoes'}]}]};
+const fakeBucket=(objects={})=>({async get(key){const str=objects[key];if(!str)return null;const data=new TextEncoder().encode(str);return {size:data.length,text:async()=>str,body:new Blob([data]).stream()};}});
+const request=(path, bucket)=>handleCourseRequest(new Request('https://lunivo.test'+path),bucket);
+test('catálogo vazio sem unidades publicadas', async()=>{const r=await request('/v1/courses/catalog',fakeBucket());assert.equal(r.status,200);assert.deepEqual(await r.json(),{version:1,units:[]});});
+test('o Worker so expoe unidades cadastradas', async()=>{const b=fakeBucket({'courses/v1/catalog.json':JSON.stringify(catalog),'courses/v1/units/it-a1-u02-r1.json':'{"version":1,"unitId":"it-a1-u02","revision":1,"lessons":[]}'});assert.equal((await request('/v1/courses/unit/it-a1-u02/1',b)).status,200);assert.equal((await request('/v1/courses/unit/it-a1-u02/2',b)).status,404);assert.equal((await request('/v1/courses/unit/it-a1-u03/1',b)).status,404);});
+test('IDs remotos autenticados são limitados ao catálogo',async()=>{const ids=await publishedCourseLessonIds(fakeBucket({'courses/v1/catalog.json':JSON.stringify(catalog)}));assert.ok(ids.has('it-a1-01'));assert.ok(ids.has('it-a1-04'));assert.deepEqual(parseCompletionSync({completedLessonIds:['it-a1-04']},ids),['it-a1-04']);assert.throws(()=>parseCompletionSync({completedLessonIds:['it-a1-99']},ids),/LICAO_DESCONHECIDA/);});
