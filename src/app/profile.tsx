@@ -9,7 +9,7 @@ import { messageForAuthError, useAuth } from '../features/auth/AuthProvider';
 import { useProgress } from '../features/progress/ProgressProvider';
 
 export default function Profile() {
-  const { progress, ready } = useProgress();
+  const { progress, ready, syncStatus, syncNow } = useProgress();
   const { user, ready: authReady, logOut, resendVerification } = useAuth();
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
@@ -49,6 +49,20 @@ export default function Profile() {
             void runAction(resendVerification, 'Enviamos outra confirmacao ao seu e-mail.');
           }} />
         </View>}
+        <View style={styles.syncPanel}>
+          <Text style={styles.noteTitle}>Sincronizacao entre aparelhos</Text>
+          <Text accessibilityLiveRegion="polite" style={styles.description}>
+            {syncStatus === 'syncing' ? 'Sincronizando licoes com a nuvem...' :
+             syncStatus === 'synced' ? 'Licoes sincronizadas com a nuvem.' :
+             syncStatus === 'error' ? 'Sem sincronizacao no momento. Suas licoes permanecem salvas neste celular.' :
+             'Aguardando sincronizacao das licoes.'}
+          </Text>
+          <View style={styles.space}>
+            <ActionButton title={syncStatus === 'syncing' ? 'Sincronizando...' : 'Sincronizar agora'}
+              secondary disabled={syncStatus === 'syncing' || busy} onPress={() => { void syncNow(); }} />
+          </View>
+          <Text style={styles.syncFoot}>Sincronizamos apenas licoes concluidas. XP e pontuacao continuam locais nesta versao.</Text>
+        </View>
         <View style={styles.space}>
           <ActionButton title={busy ? 'Aguarde...' : 'Sair da conta'} secondary disabled={busy} onPress={() => {
             void runAction(logOut, 'Voce saiu da conta. O progresso desta conta ficou preservado no celular.');
@@ -64,7 +78,7 @@ export default function Profile() {
     <View style={styles.note}>
       <Text style={styles.noteTitle}>{user ? 'Progresso da conta salvo localmente' : 'Seu progresso de visitante esta preservado'}</Text>
       <Text style={styles.noteText}>{user
-        ? 'Nesta etapa, o historico desta conta fica separado no aparelho. A sincronizacao pelo Cloudflare D1 sera ativada e testada na proxima etapa; seus pontos XP ainda nao sao sincronizados.'
+        ? 'O historico desta conta e sincronizado com o Cloudflare D1 quando ha internet. XP continua apenas neste aparelho.'
         : 'Suas licoes continuam no aparelho mesmo que voce crie uma conta. Nao transferimos o historico de visitante automaticamente para evitar mistura de contas.'}</Text>
     </View>
     <ActionButton title="Voltar às lições" onPress={() => router.replace('/')} />
@@ -87,4 +101,6 @@ const styles = StyleSheet.create({
   notice:{fontSize:13,lineHeight:20,color:colors.primary,fontWeight:'700',marginTop:15},
   note:{backgroundColor:colors.primarySoft,borderRadius:18,padding:18,marginTop:20,marginBottom:25},
   noteTitle:{fontSize:15,fontWeight:'900',color:colors.ink},noteText:{color:colors.muted,fontSize:13,lineHeight:21,marginTop:8},
+  syncPanel:{backgroundColor:colors.primarySoft,borderRadius:16,padding:16,marginTop:20},
+  syncFoot:{color:colors.muted,fontSize:12,lineHeight:18,marginTop:10},
 });
