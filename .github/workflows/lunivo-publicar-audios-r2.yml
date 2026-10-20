@@ -1,0 +1,99 @@
+name: Lunivo - Publicar audios R2
+
+# Enviar audio-lunivo-*.zip na raiz inicia a publicacao de MP3 + manifesto.
+# O app NAO e recompilado. Execucao manual apenas testa as credenciais.
+# Credenciais S3 do R2 restritas ao bucket lunivo-audios:
+# LUNIVO_R2_ACCESS_KEY_ID, LUNIVO_R2_SECRET_ACCESS_KEY.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'audio-lunivo-*.zip'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lunivo-publicar-audios-r2-main
+  cancel-in-progress: false
+
+jobs:
+  publicar:
+    name: Validar e publicar audios no R2
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      LUNIVO_R2_ACCOUNT_ID: de4d3179ca7e143ad3277ac32e681690
+      LUNIVO_R2_ACCESS_KEY_ID: ${{ secrets.LUNIVO_R2_ACCESS_KEY_ID }}
+      LUNIVO_R2_SECRET_ACCESS_KEY: ${{ secrets.LUNIVO_R2_SECRET_ACCESS_KEY }}
+    steps:
+      - name: Obter repositorio
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instalar cliente S3
+        run: python -m pip install --disable-pip-version-check boto3==1.40.70
+
+      - name: Testar validador de pacotes
+        run: python -m unittest discover -s backend/tests -p 'test_audio_publisher.py' -v
+
+      - name: Validar configuracao do publicador
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s backend/scripts/publish_audio_packages.py
+          for name in LUNIVO_R2_ACCESS_KEY_ID LUNIVO_R2_SECRET_ACCESS_KEY; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Falta configurar o segredo $name no GitHub."
+              exit 1
+            fi
+          done
+
+      - name: Verificar R2 ou publicar pacotes pendentes
+        id: envio
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = 'workflow_dispatch' ]; then
+            python backend/scripts/publish_audio_packages.py --check-only
+            echo 'published=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          mapfile -t pacotes < <(git ls-files -- 'audio-lunivo-*.zip' | sort)
+          if [ "${#pacotes[@]}" -eq 0 ]; then
+            echo 'Nenhum pacote novo para enviar.'
+            echo 'published=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python backend/scripts/publish_audio_packages.py "${pacotes[@]}"
+          printf '%s\n' "${pacotes[@]}" > "$RUNNER_TEMP/lunivo-pacotes-r2-enviados.txt"
+          echo 'published=true' >> "$GITHUB_OUTPUT"
+          echo '## Lunivo: áudios publicados no R2' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Os novos MP3s estão no bucket privado lunivo-audios, e o manifesto foi atualizado.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remover ZIPs temporarios apos publicacao bem-sucedida
+        if: ${{ steps.envio.outputs.published == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin main
+          git rebase origin/main
+          while IFS= read -r file; do
+            [ -n "$file" ] || continue
+            git rm --ignore-unmatch -- "$file"
+          done < "$RUNNER_TEMP/lunivo-pacotes-r2-enviados.txt"
+          if ! git diff --cached --quiet; then
+            git commit -m 'Remover lotes de audio ja publicados no Cloudflare R2'
+            git push origin HEAD:main
+          fi
