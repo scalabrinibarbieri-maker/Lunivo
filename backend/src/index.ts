@@ -1,8 +1,10 @@
 import { AuthenticationError, requireFirebaseUid } from './auth';
+import { handleAudioRequest } from './audio';
 import { parseCompletionSync } from './validation';
 
 interface Env {
   DB: D1Database;
+  AUDIO_BUCKET?: R2Bucket;
   FIREBASE_PROJECT_ID?: string;
 }
 const json = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), {
@@ -55,6 +57,10 @@ export default {
       if (url.pathname === '/health' && request.method === 'GET') {
         return json({ service: 'lunivo-api', version: 1, status: 'ok' });
       }
+      // Pronuncias sao arquivos publicos de aprendizado: sem autenticacao Firebase.
+      // O bucket continua privado e so e acessado pelo binding do Worker.
+      const audioResponse = await handleAudioRequest(request, env.AUDIO_BUCKET);
+      if (audioResponse) return audioResponse;
       if (!['/v1/me', '/v1/progress', '/v1/progress/sync'].includes(url.pathname)) {
         return json({ error: 'NAO_ENCONTRADO' }, 404);
       }
