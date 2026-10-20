@@ -13,5 +13,11 @@
       "database_id": "6b335307-9f33-4b3e-8f59-1d0db5cca1b7",
       "migrations_dir": "migrations"
     }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "AUDIO_BUCKET",
+      "bucket_name": "lunivo-audios"
+    }
   ]
 }
