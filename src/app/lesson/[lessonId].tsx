@@ -5,6 +5,7 @@ import { ActionButton } from '../../components/ActionButton';
 import { Page } from '../../components/Page';
 import { ProgressBar } from '../../components/ProgressBar';
 import { colors, sizes } from '../../constants/theme';
+import { ExercisePronunciation } from '../../features/audio/ExercisePronunciation';
 import { LESSONS } from '../../features/learning/data';
 import { correctAnswerLabel, gradeExercise } from '../../features/learning/engine';
 import { canStartLesson } from '../../features/progress/logic';
@@ -40,6 +41,8 @@ export default function LessonScreen() {
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.scroll}>
       <Text style={styles.label}>{question.instruction.toUpperCase()}</Text><Text style={styles.prompt}>{question.prompt}</Text>
       <Text style={styles.helper}>{question.type === 'choice' ? 'Selecione a alternativa correta' : 'Digite sua resposta abaixo'}</Text>
+      {/* A associação de áudio é por ID do exercício, independente do texto e do provedor de voz. */}
+      <ExercisePronunciation key={question.id} exerciseId={question.id} />
       {question.type === 'choice' ? <View style={styles.choices}>
         {question.options.map((option, i) => <Pressable key={option.id} accessibilityRole="button" accessibilityState={{ selected: answer === option.id, disabled: checked }}
           disabled={checked} onPress={() => setAnswer(option.id)} style={[styles.choice, answer === option.id && styles.selected]}>
