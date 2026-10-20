@@ -52,16 +52,16 @@ export default function Profile() {
         <View style={styles.syncPanel}>
           <Text style={styles.noteTitle}>Sincronizacao entre aparelhos</Text>
           <Text accessibilityLiveRegion="polite" style={styles.description}>
-            {syncStatus === 'syncing' ? 'Sincronizando licoes com a nuvem...' :
-             syncStatus === 'synced' ? 'Licoes sincronizadas com a nuvem.' :
+            {syncStatus === 'syncing' ? 'Sincronizando lições e XP com a nuvem...' :
+             syncStatus === 'synced' ? 'Lições e XP sincronizados com a nuvem.' :
              syncStatus === 'error' ? 'Sem sincronizacao no momento. Suas licoes permanecem salvas neste celular.' :
-             'Aguardando sincronizacao das licoes.'}
+             'Aguardando sincronização de lições e XP.'}
           </Text>
           <View style={styles.space}>
             <ActionButton title={syncStatus === 'syncing' ? 'Sincronizando...' : 'Sincronizar agora'}
               secondary disabled={syncStatus === 'syncing' || busy} onPress={() => { void syncNow(); }} />
           </View>
-          <Text style={styles.syncFoot}>Sincronizamos apenas licoes concluidas. XP e pontuacao continuam locais nesta versao.</Text>
+          <Text style={styles.syncFoot}>Lições e XP são sincronizados com a conta. Recompensas offline ficam pendentes até a próxima conexão.</Text>
         </View>
         <View style={styles.space}>
           <ActionButton title={busy ? 'Aguarde...' : 'Sair da conta'} secondary disabled={busy} onPress={() => {
@@ -78,7 +78,7 @@ export default function Profile() {
     <View style={styles.note}>
       <Text style={styles.noteTitle}>{user ? 'Progresso da conta salvo localmente' : 'Seu progresso de visitante esta preservado'}</Text>
       <Text style={styles.noteText}>{user
-        ? 'O historico desta conta e sincronizado com o Cloudflare D1 quando ha internet. XP continua apenas neste aparelho.'
+        ? 'Seu progresso e XP ficam salvos neste celular e sincronizam com o Cloudflare D1 ao conectar à internet.'
         : 'Suas licoes continuam no aparelho mesmo que voce crie uma conta. Nao transferimos o historico de visitante automaticamente para evitar mistura de contas.'}</Text>
     </View>
     <ActionButton title="Voltar às lições" onPress={() => router.replace('/')} />
