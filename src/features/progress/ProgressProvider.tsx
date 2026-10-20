@@ -1,44 +1,64 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import Storage from 'expo-sqlite/kv-store';
+import { useAuth } from '../auth/AuthProvider';
 import { applyLessonCompletion, EMPTY_PROGRESS, isStudentProgress, type StudentProgress } from './logic';
-const KEY = 'lunivo:progress:v1';
+
+import { progressKeyForUid } from './keys';
+
 type ProgressContextType = {
   progress: StudentProgress;
   ready: boolean;
   completeLesson: (id: string, correct: number, total: number) => Promise<number>;
 };
 const ProgressContext = createContext<ProgressContextType | null>(null);
+
 export function ProgressProvider({ children }: { children: React.ReactNode }) {
+  const { user, ready: authReady } = useAuth();
+  const key = progressKeyForUid(user?.uid ?? null);
   const [progress, setProgress] = useState<StudentProgress>(EMPTY_PROGRESS);
   const progressRef = useRef<StudentProgress>(EMPTY_PROGRESS);
-  const [ready, setReady] = useState(false);
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  const ready = authReady && loadedKey === key;
+
   useEffect(() => {
+    if (!authReady) return;
     let active = true;
     (async () => {
       try {
-        const value = await Storage.getItem(KEY);
+        const value = await Storage.getItem(key);
         const parsed: unknown = value ? JSON.parse(value) : null;
-        const stored = isStudentProgress(parsed) ? parsed : EMPTY_PROGRESS;
-        if (active) { progressRef.current = stored; setProgress(stored); }
+        const restored = isStudentProgress(parsed) ? parsed : EMPTY_PROGRESS;
+        if (active) {
+          progressRef.current = restored;
+          setProgress(restored);
+        }
       } catch (error) {
-        console.warn('Falha na leitura do progresso salvo:', error);
-      } finally { if (active) setReady(true); }
+        console.warn('Falha ao ler o progresso local:', error);
+        if (active) {
+          progressRef.current = EMPTY_PROGRESS;
+          setProgress(EMPTY_PROGRESS);
+        }
+      } finally {
+        if (active) setLoadedKey(key);
+      }
     })();
     return () => { active = false; };
-  }, []);
+  }, [authReady, key]);
+
   const completeLesson = useCallback(async (id: string, correct: number, total: number): Promise<number> => {
-    if (!ready) throw new Error('Progresso ainda não carregado');
+    if (!ready) throw new Error('Progresso ainda nao carregado');
     const { next, earnedXp } = applyLessonCompletion(progressRef.current, id, correct, total, new Date().toISOString());
     if (next !== progressRef.current) {
-      // Confirma gravação em disco antes de exibir a recompensa.
-      await Storage.setItem(KEY, JSON.stringify(next));
+      await Storage.setItem(key, JSON.stringify(next));
       progressRef.current = next;
       setProgress(next);
     }
     return earnedXp;
-  }, [ready]);
+  }, [key, ready]);
+
   return <ProgressContext.Provider value={{ progress, ready, completeLesson }}>{children}</ProgressContext.Provider>;
 }
+
 export function useProgress() {
   const context = useContext(ProgressContext);
   if (!context) throw new Error('useProgress deve estar dentro de ProgressProvider');

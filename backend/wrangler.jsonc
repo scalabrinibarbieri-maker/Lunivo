@@ -3,6 +3,9 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-10-19",
   "workers_dev": true,
+  "vars": {
+    "FIREBASE_PROJECT_ID": "lunivo-25675"
+  },
   "d1_databases": [
     {
       "binding": "DB",
