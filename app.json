@@ -21,6 +21,16 @@
     },
     "plugins": [
       "expo-router",
+      ["expo-splash-screen", {
+        "backgroundColor": "#071625",
+        "image": "./assets/lunivo-logo.png",
+        "imageWidth": 230,
+        "resizeMode": "contain",
+        "dark": {
+          "image": "./assets/lunivo-logo.png",
+          "backgroundColor": "#071625"
+        }
+      }],
       ["expo-audio", {
         "microphonePermission": false,
         "recordAudioAndroid": false,
