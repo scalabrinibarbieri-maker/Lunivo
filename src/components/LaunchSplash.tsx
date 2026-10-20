@@ -1,24 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
-import { Animated, Image, StyleSheet, View } from 'react-native';
+import { Animated, Image, StyleSheet } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
 import { useAuth } from '../features/auth/AuthProvider';
 import { useCourses } from '../features/courses/CourseProvider';
 import { useProgress } from '../features/progress/ProgressProvider';
 
-// Reproduz a composicao cinematografica APROVADA, nao uma aproximacao
-// feita com circulos ou gradientes simplificados. A imagem e local/offline.
+// Mantemos a arte cinematográfica local; não criamos outra logo ou carregamento fictício.
 const NAVY = '#071625';
 const LOGO = require('../../assets/lunivo-logo.png');
 const CINEMATIC_ART = require('../../assets/lunivo-splash-cinematic.png');
 
-/**
- * Splash em duas fases:
- * 1. Android/iOS exibem a tela nativa declarada no app.json.
- * 2. A arte aprovada substitui a tela nativa, com zoom minimo e dissolve.
- *
- * A transicao usa apenas os estados dos provedores EXISTENTES e nunca
- * requisita recursos remotos para renderizar a arte. Sem carregamento falso.
- */
 export function LaunchSplash({ onFinished }: { onFinished: () => void }) {
   const { ready: authReady } = useAuth();
   const { ready: courseReady } = useCourses();
@@ -26,12 +17,14 @@ export function LaunchSplash({ onFinished }: { onFinished: () => void }) {
   const [laidOut, setLaidOut] = useState(false);
   const [artReady, setArtReady] = useState(false);
   const [nativeHidden, setNativeHidden] = useState(false);
+  const [holdComplete, setHoldComplete] = useState(false);
   const [timedOut, setTimedOut] = useState(false);
   const started = useRef(false);
   const opacity = useRef(new Animated.Value(1)).current;
   const scale = useRef(new Animated.Value(1)).current;
+  const navyVeil = useRef(new Animated.Value(0)).current;
 
-  // Resgate para que erros de inicializacao nao prendam o usuario na splash.
+  // Nunca travar o acesso ao app devido a uma falha de inicialização.
   useEffect(() => {
     const fallback = setTimeout(() => setTimedOut(true), 8000);
     return () => clearTimeout(fallback);
@@ -40,23 +33,33 @@ export function LaunchSplash({ onFinished }: { onFinished: () => void }) {
   useEffect(() => {
     if (!laidOut || (!artReady && !timedOut) || nativeHidden) return;
     let mounted = true;
-    // A tela nativa some somente com a arte renderizada (ou apos timeout).
     void SplashScreen.hideAsync()
       .catch(error => console.warn('Falha ao ocultar splash nativa:', error))
       .finally(() => { if (mounted) setNativeHidden(true); });
     return () => { mounted = false; };
   }, [laidOut, artReady, nativeHidden, timedOut]);
 
+  // Movimento mínimo na composição real, enquanto ela está 100% opaca.
+  // A marca permanece visível por tempo suficiente, inclusive em aparelhos rápidos.
+  useEffect(() => {
+    if (!nativeHidden) return;
+    Animated.timing(scale, { toValue: 1.025, duration: 1500, useNativeDriver: true }).start();
+    const hold = setTimeout(() => setHoldComplete(true), 1150);
+    return () => clearTimeout(hold);
+  }, [nativeHidden, scale]);
+
   useEffect(() => {
     const dataReady = authReady && progressReady && courseReady;
-    if (!nativeHidden || (!dataReady && !timedOut) || started.current) return;
+    if (!nativeHidden || !holdComplete || (!dataReady && !timedOut) || started.current) return;
     started.current = true;
-    // Transicao de marca, nao barra de progresso inventada.
-    Animated.parallel([
-      Animated.timing(opacity, { toValue: 0, duration: 760, useNativeDriver: true }),
-      Animated.timing(scale, { toValue: 1.025, duration: 760, useNativeDriver: true }),
+    // Corrige o clarão visto na gravação: NÃO dissolvemos a arte sobre a home.
+    // 1) Cobrimos os reflexos/wordmark com azul sólido.
+    // 2) Dissolvemos APENAS uma superfície lisa para revelar a home.
+    Animated.sequence([
+      Animated.timing(navyVeil, { toValue: 1, duration: 240, useNativeDriver: true }),
+      Animated.timing(opacity, { toValue: 0, duration: 380, useNativeDriver: true }),
     ]).start(({ finished }) => { if (finished) onFinished(); });
-  }, [authReady, progressReady, courseReady, nativeHidden, timedOut, opacity, scale, onFinished]);
+  }, [authReady, progressReady, courseReady, nativeHidden, holdComplete, timedOut, opacity, navyVeil, onFinished]);
 
   return (
     <Animated.View
@@ -65,16 +68,16 @@ export function LaunchSplash({ onFinished }: { onFinished: () => void }) {
       style={[styles.fill, styles.surface, { opacity }]}
       accessibilityLabel="Lunivo iniciando"
     >
-      {/* Fallback local caso a arte cinematografica nao decodifique. */}
       {!artReady && <Image source={LOGO} style={styles.fallbackLogo} resizeMode="contain" />}
       <Animated.Image
         source={CINEMATIC_ART}
         resizeMode="cover"
         fadeDuration={0}
         onLoadEnd={() => setArtReady(true)}
-        accessibilityLabel="Abertura cinematografica Lunivo"
+        accessibilityLabel="Abertura cinematográfica Lunivo"
         style={[styles.fullArtwork, { transform: [{ scale }] }]}
       />
+      <Animated.View pointerEvents="none" style={[styles.fill, { backgroundColor: NAVY, opacity: navyVeil }]} />
     </Animated.View>
   );
 }
@@ -83,11 +86,8 @@ const styles = StyleSheet.create({
   fill: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
   surface: {
     backgroundColor: NAVY,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-    zIndex: 50,
-    elevation: 50,
+    alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+    zIndex: 50, elevation: 50,
   },
   fullArtwork: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, width: '100%', height: '100%' },
   fallbackLogo: { width: 230, height: 210 },
