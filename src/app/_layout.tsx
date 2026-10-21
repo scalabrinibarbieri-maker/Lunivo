@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View } from 'react-native';
+import { ActivityIndicator, View } from 'react-native';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
@@ -8,17 +8,18 @@ import { colors } from '../constants/theme';
 import { AuthProvider, useAuth } from '../features/auth/AuthProvider';
 import { CourseProvider, useCourses } from '../features/courses/CourseProvider';
 import { ProgressProvider, useProgress } from '../features/progress/ProgressProvider';
+import { OnboardingProvider, useOnboarding } from '../features/onboarding/OnboardingProvider';
 
-// Apenas a splash NATIVA do Android/iOS. Nenhuma segunda tela, imagem
-// cinematografica ou camada animada por cima das licoes.
+// Apenas a splash NATIVA do Android/iOS. Nenhuma segunda splash.
 void SplashScreen.preventAutoHideAsync().catch(() => {});
 
 function AppNavigation() {
   const { ready: authReady } = useAuth();
   const { ready: courseReady } = useCourses();
   const { ready: progressReady } = useProgress();
+  const { ready: onboardingReady, completed } = useOnboarding();
   const [laidOut, setLaidOut] = useState(false);
-  const dataReady = authReady && courseReady && progressReady;
+  const dataReady = authReady && courseReady && progressReady && onboardingReady;
 
   useEffect(() => {
     if (!laidOut) return;
@@ -26,7 +27,7 @@ function AppNavigation() {
       void SplashScreen.hideAsync().catch(error => console.warn('Splash Lunivo:', error));
       return;
     }
-    // Se algum provedor falhar, nao manter o celular preso na splash.
+    // Se a nuvem demorar, a splash nativa sai mas as rotas continuam protegidas.
     const fallback = setTimeout(() => {
       void SplashScreen.hideAsync().catch(error => console.warn('Splash Lunivo:', error));
     }, 6000);
@@ -34,9 +35,23 @@ function AppNavigation() {
   }, [laidOut, dataReady]);
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }} onLayout={() => setLaidOut(true)}>
-      <StatusBar style="dark" />
-      <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right' }} />
+    <View style={{ flex: 1, backgroundColor: onboardingReady && !completed ? '#071625' : colors.background }} onLayout={() => setLaidOut(true)}>
+      <StatusBar style={onboardingReady && !completed ? 'light' : 'dark'} />
+      {!onboardingReady ? <ActivityIndicator style={{ flex: 1 }} color="#9CC5FF" /> : (
+        <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
+          <Stack.Protected guard={!completed}>
+            <Stack.Screen name="onboarding" options={{ animation: 'fade' }} />
+          </Stack.Protected>
+          <Stack.Protected guard={completed}>
+            <Stack.Screen name="index" />
+            <Stack.Screen name="courses" />
+            <Stack.Screen name="profile" />
+            <Stack.Screen name="auth" />
+            <Stack.Screen name="lesson/[lessonId]" />
+            <Stack.Screen name="result" />
+          </Stack.Protected>
+        </Stack>
+      )}
     </View>
   );
 }
@@ -47,7 +62,9 @@ export default function RootLayout() {
       <AuthProvider>
         <CourseProvider>
           <ProgressProvider>
-            <AppNavigation />
+            <OnboardingProvider>
+              <AppNavigation />
+            </OnboardingProvider>
           </ProgressProvider>
         </CourseProvider>
       </AuthProvider>

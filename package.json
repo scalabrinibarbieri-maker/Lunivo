@@ -21,6 +21,7 @@
     "expo-status-bar": "~57.0.1",
     "expo-audio": "~57.0.5",
     "expo-asset": "57.0.20",
+    "expo-notifications": "~57.0.18",
     "firebase": "^12.0.0",
     "react": "19.2.3",
     "react-native": "0.86.3",

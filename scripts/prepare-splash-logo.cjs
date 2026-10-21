@@ -1,7 +1,8 @@
 /**
- * Lunivo: gera um PNG com margens transparentes a partir do logo ORIGINAL.
- * Não redesenha nenhum pixel da marca e não depende de bibliotecas externas.
- * Executado no npm postinstall, antes do prebuild Expo/Android/iOS.
+ * Lunivo V7: cria margem segura no PNG da splash NATIVA usando os pixels originais.
+ * Nada é redesenhado. Mais espaço à direita protege o último O contra o recorte
+ * circular das splash screens do Android 12+.
+ * A imagem é gerada no postinstall para não incluir binários redundantes no ZIP.
  */
 const fs = require('node:fs');
 const path = require('node:path');
@@ -138,16 +139,19 @@ function main() {
   }
   if (maxX < minX) throw Error('Logo sem pixels visiveis');
   const cw = maxX - minX + 1, ch = maxY - minY + 1;
-  const safeX = Math.max(32, Math.ceil(cw * 0.16));
-  const safeY = Math.max(20, Math.ceil(ch * 0.20));
-  const nw = cw + safeX * 2, nh = ch + safeY * 2;
-  const output = Buffer.alloc(nw * nh * 4); // padding 100% transparente
-  for (let y = 0; y < ch; y++) pixels.copy(output, ((y + safeY) * nw + safeX) * 4, ((y + minY) * w + minX) * 4, ((y + minY) * w + minX + cw) * 4);
+  // A borda esquerda e a direita têm área transparente real, sem mascarar letras.
+  // O lado direito recebe folga adicional para o 'O' final do nome Lunivo.
+  const safeLeftX = Math.max(42, Math.ceil(cw * 0.28));
+  const safeRightX = Math.max(60, Math.ceil(cw * 0.40));
+  const safeY = Math.max(28, Math.ceil(ch * 0.25));
+  const nw = cw + safeLeftX + safeRightX, nh = ch + safeY * 2;
+  const output = Buffer.alloc(nw * nh * 4);
+  for (let y = 0; y < ch; y++) pixels.copy(output, ((y + safeY) * nw + safeLeftX) * 4, ((y + minY) * w + minX) * 4, ((y + minY) * w + minX + cw) * 4);
   const serialized = pngRgba(nw, nh, output);
   if (!fs.existsSync(DEST) || !fs.readFileSync(DEST).equals(serialized)) {
     fs.mkdirSync(path.dirname(DEST), { recursive: true });
     fs.writeFileSync(DEST, serialized);
   }
-  console.log(`Splash Lunivo: ${w}x${h} original -> ${nw}x${nh} com margens transparentes simetricas (${safeX}px laterais, ${safeY}px vertical)`);
+  console.log(`Splash Lunivo V7: ${w}x${h} -> ${nw}x${nh}, margens sem alterar pixels (${safeLeftX}px esquerda, ${safeRightX}px direita, ${safeY}px vertical)`);
 }
 main();
