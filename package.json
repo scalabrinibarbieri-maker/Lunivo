@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test tests/*.test.mjs",
     "doctor": "expo-doctor",
-    "postinstall": "node scripts/fix-expo-publications.cjs"
+    "postinstall": "node scripts/fix-expo-publications.cjs && node scripts/prepare-splash-logo.cjs"
   },
   "dependencies": {
     "expo": "~57.0.10",

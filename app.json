@@ -21,22 +21,28 @@
     },
     "plugins": [
       "expo-router",
-      ["expo-splash-screen", {
-        "backgroundColor": "#071625",
-        "image": "./assets/lunivo-logo.png",
-        "imageWidth": 230,
-        "resizeMode": "contain",
-        "dark": {
-          "image": "./assets/lunivo-logo.png",
-          "backgroundColor": "#071625"
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#071625",
+          "image": "./assets/lunivo-logo-splash.png",
+          "imageWidth": 260,
+          "resizeMode": "contain",
+          "dark": {
+            "image": "./assets/lunivo-logo-splash.png",
+            "backgroundColor": "#071625"
+          }
         }
-      }],
-      ["expo-audio", {
-        "microphonePermission": false,
-        "recordAudioAndroid": false,
-        "enableBackgroundPlayback": false,
-        "enableBackgroundRecording": false
-      }]
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": false,
+          "recordAudioAndroid": false,
+          "enableBackgroundPlayback": false,
+          "enableBackgroundRecording": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": false
