@@ -145,10 +145,17 @@ export default function OnboardingScreen() {
         <Image source={require('../../assets/lunivo-logo.png')} resizeMode="contain" style={styles.brandImage} accessibilityLabel="Logo Lunivo" />
       </View>
       <Tag>SEU PRÓXIMO CAPÍTULO</Tag>
-      <Text style={styles.headline}>O mundo se abre a quem aprende.</Text>
-      <Text style={styles.description}>Um idioma de cada vez. Uma conquista todos os dias.</Text>
+      <Text style={[styles.headline, styles.welcomeHeadline]}>O melhor aplicativo para o seu aprendizado.</Text>
+      <Text style={styles.description}>Temos cursos disponíveis para você</Text>
       <View style={styles.quoteCard}>
-        <Text style={styles.quoteMark}>✦</Text>
+        <View style={styles.quoteEmblem} pointerEvents="none" accessible={false}>
+          <View style={styles.quoteEmblemDiamond} />
+          <View style={styles.quoteEmblemCore} />
+          <View style={styles.quoteRayTop} />
+          <View style={styles.quoteRayBottom} />
+          <View style={styles.quoteRayLeft} />
+          <View style={styles.quoteRayRight} />
+        </View>
         <Text style={styles.quote}>Evolua todos os dias, e em breve, estará mais próximo do objetivo.</Text>
       </View>
     </>;
@@ -267,12 +274,21 @@ const styles = StyleSheet.create({
   body: { flexGrow: 1, paddingHorizontal: 26, paddingTop: 31, justifyContent: 'center' },
   tag: { color: GOLD, fontWeight: '800', letterSpacing: 2.1, fontSize: 10, marginBottom: 15 },
   headline: { color: WHITE, fontWeight: '900', fontSize: 33, letterSpacing: -1.05, lineHeight: 40, maxWidth: 410 },
+  welcomeHeadline: { fontSize: 30, lineHeight: 37, letterSpacing: -0.95 },
   description: { color: MUTED, fontSize: 15.5, lineHeight: 24, marginTop: 13, maxWidth: 410 },
   welcomeArt: { height: 186, alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
   logoAura: { position: 'absolute', width: 260, height: 145, backgroundColor: '#2C89F2', borderRadius: 90, shadowColor: '#55A9FF', shadowRadius: 40, shadowOpacity: 0.8, elevation: 13 },
   brandImage: { width: 270, height: 155 },
   quoteCard: { marginTop: 28, padding: 21, backgroundColor: '#102A4C', borderColor: '#294C77', borderWidth: 1, borderRadius: 22, flexDirection: 'row', alignItems: 'flex-start', gap: 13 },
-  quoteMark: { color: GOLD, fontSize: 23, marginTop: -3 },
+  // Emblema geometrico de tracos finos: substitui o caractere decorativo cheio
+  // por um detalhe dourado premium, com renderizacao nativa previsivel.
+  quoteEmblem: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', marginTop: -1 },
+  quoteEmblemDiamond: { width: 17, height: 17, borderRadius: 3, borderWidth: 1.6, borderColor: GOLD, transform: [{ rotate: '45deg' }] },
+  quoteEmblemCore: { position: 'absolute', width: 4, height: 4, borderRadius: 1, backgroundColor: GOLD, transform: [{ rotate: '45deg' }] },
+  quoteRayTop: { position: 'absolute', width: 1.5, height: 5, top: 1, backgroundColor: GOLD, borderRadius: 2 },
+  quoteRayBottom: { position: 'absolute', width: 1.5, height: 5, bottom: 1, backgroundColor: GOLD, borderRadius: 2 },
+  quoteRayLeft: { position: 'absolute', width: 5, height: 1.5, left: 1, backgroundColor: GOLD, borderRadius: 2 },
+  quoteRayRight: { position: 'absolute', width: 5, height: 1.5, right: 1, backgroundColor: GOLD, borderRadius: 2 },
   quote: { color: '#E7F0FF', fontWeight: '600', fontSize: 16, lineHeight: 25, flex: 1 },
   optionsList: { marginTop: 32, gap: 13 },
   option: { flexDirection: 'row', alignItems: 'center', borderRadius: 20, paddingHorizontal: 15, paddingVertical: 17, backgroundColor: '#102741', borderWidth: 1, borderColor: '#2A4668', minHeight: 84 },
