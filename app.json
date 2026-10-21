@@ -16,7 +16,7 @@
       "package": "com.orangi.lunivo",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#14273F"
+        "backgroundColor": "#071625"
       }
     },
     "plugins": [
