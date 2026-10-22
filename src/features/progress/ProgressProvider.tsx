@@ -9,6 +9,7 @@ import { localStudyDay, daysFromLegacy, normalizeStudyDays } from './streak';
 import { progressKeyForUid } from './keys';
 import { fetchCloudProgress, uploadCloudProgress, uploadXpAwards, importOldXp, uploadStudyDays } from './syncApi';
 import { mergeCloudXp, planProgressSync, xpToImport } from './syncLogic';
+import { applyVocabularyReview, type VocabularyWord } from '../vocabulary/logic';
 
 type SyncStatus = 'guest' | 'idle' | 'syncing' | 'synced' | 'error';
 type ProgressContextType = {
@@ -17,6 +18,7 @@ type ProgressContextType = {
   syncStatus: SyncStatus;
   syncNow: () => Promise<boolean>;
   completeLesson: (id: string, correct: number, total: number) => Promise<number>;
+  recordVocabulary: (words: readonly VocabularyWord[], correct: boolean) => Promise<void>;
 };
 const ProgressContext = createContext<ProgressContextType | null>(null);
 
@@ -189,7 +191,18 @@ export function ProgressProvider({ children }: { children: React.ReactNode }) {
     return earnedXp;
   }, [key, ready, uid, updateLocal, lessonIds]);
 
-  return <ProgressContext.Provider value={{ progress, ready, syncStatus, syncNow, completeLesson }}>
+  const recordVocabulary = useCallback(async (words: readonly VocabularyWord[], correct: boolean): Promise<void> => {
+    if (!ready || words.length === 0) return;
+    const now = new Date().toISOString();
+    // Persiste na mesma fila de XP/streak e na chave por conta (inclusive visitante).
+    await updateLocal(key, current => ({
+      ...current,
+      vocabulary: applyVocabularyReview(current.vocabulary ?? {}, words, correct, now),
+    }));
+    // O backend atual sincroniza XP/lições/streak, não vocabulário: local por enquanto.
+  }, [ready, key, updateLocal]);
+
+  return <ProgressContext.Provider value={{ progress, ready, syncStatus, syncNow, completeLesson, recordVocabulary }}>
     {children}
   </ProgressContext.Provider>;
 }

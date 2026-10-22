@@ -23,6 +23,7 @@ import { isChoiceExercise, isListeningExercise, isWriteExercise } from '../../fe
 import { canStartLesson } from '../../features/progress/logic';
 import { useProgress } from '../../features/progress/ProgressProvider';
 import { computeStreak, daysFromLegacy, localStudyDay } from '../../features/progress/streak';
+import { wordsForExercise } from '../../features/vocabulary/logic';
 
 const NAVY = '#071D34';
 const BLUE = '#246FEB';
@@ -31,7 +32,7 @@ const RED = '#B74D4D';
 
 export default function LessonScreen() {
   const { lessonId } = useLocalSearchParams<{ lessonId: string }>();
-  const { progress, ready, completeLesson } = useProgress();
+  const { progress, ready, completeLesson, recordVocabulary } = useProgress();
   const { loadLesson, lessonIds, imageUri } = useCourses();
   const [resolved, setResolved] = useState<Lesson | undefined>();
   const loaderRef = useRef(loadLesson);
@@ -126,9 +127,20 @@ export default function LessonScreen() {
     setSpellingCorrection(right ? evaluateExercise(question, answer).spellingCorrection : null);
     setChecked(true);
     if (right) setCount(c => c + 1);
+    // Cada questão reforça ou enfraquece o vocabulário correspondente.
+    // Associações parcialmente corretas não penalizam todas as palavras do conjunto.
+    if (question.type !== 'match' || right) {
+      void recordVocabulary(wordsForExercise(lesson.id, question), right)
+        .catch(e => console.warn('Vocabulário não salvo:', e));
+    }
   };
   const next = async () => {
     if (submitting) return;
+    if (question.type === 'info') {
+      // A etapa instrutiva registra exposição, mas não concede XP nem altera a streak.
+      try { await recordVocabulary(wordsForExercise(lesson.id, question), true); }
+      catch (e) { console.warn('Vocabulário não salvo:', e); }
+    }
     if (index < lesson.exercises.length - 1) {
       setIndex(v => v + 1);
       setAnswer(''); setChecked(false); setCorrect(false); setSpellingCorrection(null);

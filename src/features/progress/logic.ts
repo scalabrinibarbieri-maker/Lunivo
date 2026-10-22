@@ -1,4 +1,5 @@
 import { addStudyDay, daysFromLegacy, isStudyDay } from './streak.ts';
+import { isVocabularyMemory, type VocabularyMemory } from '../vocabulary/logic.ts';
 
 /** Novos campos sao opcionais para recuperar o progresso salvo em versoes antigas. */
 export type PendingXpAward = { lessonId: string; xp: number };
@@ -7,6 +8,7 @@ export type StudentProgress = {
   totalXp: number;
   lastStudiedAt: string | null;
   studyDays?: string[];
+  vocabulary?: VocabularyMemory;
   pendingXpAwards?: PendingXpAward[];
   legacyXpBaseline?: number;
   legacyXpImported?: boolean;
@@ -51,6 +53,7 @@ export function isStudentProgress(value: unknown): value is StudentProgress {
     (v.lastStudiedAt === null || typeof v.lastStudiedAt === 'string');
   if (!valid) return false;
   if (v.studyDays !== undefined && (!Array.isArray(v.studyDays) || v.studyDays.some(day => !isStudyDay(day)))) return false;
+  if (v.vocabulary !== undefined && !isVocabularyMemory(v.vocabulary)) return false;
   if (v.legacyXpBaseline !== undefined && (!Number.isSafeInteger(v.legacyXpBaseline) || v.legacyXpBaseline < 0)) return false;
   if (v.legacyXpImported !== undefined && typeof v.legacyXpImported !== 'boolean') return false;
   if (v.pendingXpAwards !== undefined && (!Array.isArray(v.pendingXpAwards) ||

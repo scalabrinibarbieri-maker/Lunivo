@@ -4,13 +4,14 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import { Page } from '../components/Page';
 import { ActionButton } from '../components/ActionButton';
 import { PremiumEmblem } from '../components/PremiumEmblem';
+import { VocabularyPanel } from '../components/VocabularyPanel';
 import { colors, sizes } from '../constants/theme';
 import { LESSONS } from '../features/learning/data';
 import { messageForAuthError, useAuth } from '../features/auth/AuthProvider';
 import { useProgress } from '../features/progress/ProgressProvider';
 
 export default function Profile() {
-  const { progress, ready, syncStatus, syncNow } = useProgress();
+  const { progress, ready, syncStatus, syncNow, recordVocabulary } = useProgress();
   const { user, ready: authReady, logOut, resendVerification } = useAuth();
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
@@ -44,6 +45,7 @@ export default function Profile() {
       <View style={styles.info}><Text style={styles.value}>{progress.completedLessonIds.length}</Text><Text style={styles.meta}>Lições concluídas</Text></View>
       <View style={styles.info}><Text style={styles.value}>{LESSONS.length}</Text><Text style={styles.meta}>Lições iniciais</Text></View>
     </View>
+    <VocabularyPanel memory={progress.vocabulary ?? {}} onReview={recordVocabulary} />
     <View style={styles.account}>
       <Text style={styles.kicker}>MINHA CONTA</Text>
       <Text style={styles.accountTitle}>{user ? 'Conta conectada' : 'Aprendendo como visitante'}</Text>
