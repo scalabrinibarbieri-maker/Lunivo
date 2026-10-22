@@ -216,7 +216,6 @@ export default function Home() {
               <View style={styles.brandIdentity}>
                 <Image source={require('../../assets/lunivo-logo.png')} resizeMode="contain"
                   style={styles.brandLogo} accessible accessibilityLabel="Logo Lunivo" />
-                <Text style={styles.brandCaption}>seu idioma novo.</Text>
               </View>
               <Pressable accessibilityRole="button" accessibilityLabel="Abrir meu perfil"
                 onPress={() => router.push('/profile')}
@@ -408,9 +407,10 @@ const styles = StyleSheet.create({
   ambientTop: { position: 'absolute', top: -235, right: -174, width: 405, height: 405, borderRadius: 215, backgroundColor: '#0B3054', opacity: 0.8 },
   ambientSmall: { position: 'absolute', top: 171, left: -220, width: 330, height: 330, borderRadius: 165, backgroundColor: '#0A345B', opacity: 0.35 },
   brandRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  // O PNG original possui margens transparentes internas. O deslocamento
+  // compensa essas margens sem redesenhar ou alterar a marca.
   brandIdentity: { alignItems: 'flex-start', justifyContent: 'center' },
-  brandLogo: { width: 162, height: 52 },
-  brandCaption: { marginTop: 0, marginLeft: 3, color: '#B8CDE4', fontSize: 11, fontWeight: '700', letterSpacing: 0.35 },
+  brandLogo: { width: 218, height: 74, marginLeft: -54 },
   avatar: { width: 46, height: 46, borderRadius: 16, borderWidth: 1, borderColor: '#315270', backgroundColor: '#153451', alignItems: 'center', justifyContent: 'center' },
   badgeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 19 },
   languageChip: { flexDirection: 'row', alignItems: 'center', borderRadius: 13, backgroundColor: '#153C5C', borderWidth: 1, borderColor: '#245479', paddingVertical: 9, paddingHorizontal: 12, gap: 8 },
