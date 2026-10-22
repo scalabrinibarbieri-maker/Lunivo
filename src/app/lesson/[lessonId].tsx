@@ -13,7 +13,7 @@ import { ExercisePronunciation } from '../../features/audio/ExercisePronunciatio
 import { useFeedbackSounds } from '../../features/audio/useFeedbackSounds';
 import { useCourses } from '../../features/courses/CourseProvider';
 import type { Lesson } from '../../features/learning/types';
-import { correctAnswerLabel, gradeExercise } from '../../features/learning/engine';
+import { correctAnswerLabel, evaluateExercise, gradeExercise } from '../../features/learning/engine';
 import { isChoiceExercise, isListeningExercise, isWriteExercise } from '../../features/learning/types';
 import { canStartLesson } from '../../features/progress/logic';
 import { useProgress } from '../../features/progress/ProgressProvider';
@@ -34,6 +34,7 @@ export default function LessonScreen() {
   const [answer, setAnswer] = useState('');
   const [checked, setChecked] = useState(false);
   const [correct, setCorrect] = useState(false);
+  const [spellingCorrection, setSpellingCorrection] = useState<string | null>(null);
   const [count, setCount] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [audioReady, setAudioReady] = useState(false);
@@ -92,8 +93,10 @@ export default function LessonScreen() {
   const verify = () => {
     if (checked || !canVerify) return;
     Keyboard.dismiss();
+    // Mantém a checagem booleana antiga (XP); a avaliação detalhada só explica a grafia.
     const right = gradeExercise(question, answer);
     setCorrect(right);
+    setSpellingCorrection(right ? evaluateExercise(question, answer).spellingCorrection : null);
     setChecked(true);
     if (right) setCount(c => c + 1);
   };
@@ -101,7 +104,7 @@ export default function LessonScreen() {
     if (submitting) return;
     if (index < lesson.exercises.length - 1) {
       setIndex(v => v + 1);
-      setAnswer(''); setChecked(false); setCorrect(false);
+      setAnswer(''); setChecked(false); setCorrect(false); setSpellingCorrection(null);
       setAudioReady(false); setSkipped(false);
       scrollRef.current?.scrollTo({ y: 0, animated: false });
       return;
@@ -119,7 +122,7 @@ export default function LessonScreen() {
   const audioExerciseId = listening ? question.audioExerciseId : question.id;
   const exerciseHint = question.type === 'match' ? 'Relacione as expressões nas duas colunas.'
     : choice ? 'Escolha a alternativa que faz sentido.' : 'Escreva sua resposta no campo abaixo.';
-  const feedbackTitle = skipped ? 'Atividade pulada' : correct ? 'Resposta correta!' : 'Vamos aprender com essa resposta';
+  const feedbackTitle = skipped ? 'Atividade pulada' : correct ? (spellingCorrection ? 'Correto! Ajuste a escrita.' : 'Resposta correta!') : 'Vamos aprender com essa resposta';
 
   return <Page><KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.layout}>
     <View style={styles.header}>
@@ -193,9 +196,13 @@ export default function LessonScreen() {
           </View>
           <View style={styles.feedbackCopy}>
             <Text style={[styles.feedbackTitle, skipped ? styles.skippedTitle : correct ? styles.goodTitle : styles.badTitle]}>{feedbackTitle}</Text>
-            <Text style={styles.feedbackStatus}>{skipped ? 'Sem pontuação nesta questão' : correct ? 'Muito bem! Continue avançando.' : 'Confira a resposta e continue praticando.'}</Text>
+            <Text style={styles.feedbackStatus}>{skipped ? 'Sem pontuação nesta questão' : correct ? (spellingCorrection ? 'Resposta aceita! Veja a grafia correta abaixo.' : 'Muito bem! Continue avançando.') : 'Confira a resposta e continue praticando.'}</Text>
           </View>
         </View>
+        {!skipped && correct && spellingCorrection && <View style={styles.spellingPanel}>
+          <Text style={styles.spellingLabel}>GRAFIA CORRETA</Text>
+          <Text selectable style={styles.spellingValue}>{spellingCorrection}</Text>
+        </View>}
         {!skipped && !correct && <View style={styles.correctAnswer}>
           <Text style={styles.answerLabel}>RESPOSTA CORRETA</Text>
           <Text selectable style={styles.answerText}>{correctAnswerLabel(question)}</Text>
@@ -273,6 +280,9 @@ const styles = StyleSheet.create({
   feedbackTitle: { fontWeight: '900', fontSize: 16, lineHeight: 21 },
   goodTitle: { color: '#126E50' }, badTitle: { color: '#A34441' }, skippedTitle: { color: '#926625' },
   feedbackStatus: { color: '#667C90', fontSize: 12, lineHeight: 17 },
+  spellingPanel: { marginTop: 16, backgroundColor: '#FFF8E9', borderColor: '#F0D5A5', borderWidth: 1, borderRadius: 14, padding: 14, gap: 6 },
+  spellingLabel: { fontSize: 10, color: '#8B651B', letterSpacing: 1.1, fontWeight: '900' },
+  spellingValue: { fontSize: 18, color: NAVY, fontWeight: '900' },
   correctAnswer: { marginTop: 16, borderTopWidth: 1, borderTopColor: 'rgba(134,97,97,0.18)', paddingTop: 15, gap: 7 },
   answerLabel: { color: '#99514E', fontWeight: '900', letterSpacing: 1.1, fontSize: 10 },
   answerText: { color: NAVY, fontWeight: '800', fontSize: 16, lineHeight: 24 },
