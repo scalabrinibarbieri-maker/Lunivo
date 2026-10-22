@@ -44,7 +44,7 @@ export default function Result() {
       <View style={styles.streakCopy}>
         {celebration && <Text style={styles.streakCelebrationKicker}>Sequência garantida hoje</Text>}
         <Text style={styles.streakTitle}>{streak.current} {streak.current === 1 ? 'dia seguido' : 'dias seguidos'}</Text>
-        <Text style={styles.streakText}>{streak.studiedToday ? 'Estudo de hoje registrado. Volte amanhã para continuar!' : 'Continue praticando para manter sua sequência.'}</Text>
+        <Text style={styles.streakText}>{streak.studiedToday ? 'Parabéns! Mais uma conquista na sua jornada. Continue evoluindo!' : 'Continue praticando para manter sua sequência.'}</Text>
       </View>
     </View>
     <View style={styles.bottom}><ActionButton title="Continuar aprendendo" onPress={() => router.replace('/')} /></View>
