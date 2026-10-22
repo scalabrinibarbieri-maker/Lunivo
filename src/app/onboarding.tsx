@@ -146,7 +146,7 @@ export default function OnboardingScreen() {
       </View>
       <Tag>SEU PRÓXIMO CAPÍTULO</Tag>
       <Text style={[styles.headline, styles.welcomeHeadline]}>O melhor aplicativo para o seu aprendizado.</Text>
-      <Text style={styles.description}>Temos cursos disponíveis para você</Text>
+      <Text style={styles.description}>Temos cursos disponíveis para você.</Text>
       <View style={styles.quoteCard}>
         <View style={styles.quoteEmblem} pointerEvents="none" accessible={false}>
           <View style={styles.quoteEmblemDiamond} />
