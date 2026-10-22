@@ -1,12 +1,16 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator, Alert, Keyboard, KeyboardAvoidingView, Platform, Pressable,
+  ScrollView, StyleSheet, Text, TextInput, View,
+} from 'react-native';
 import { ActionButton } from '../../components/ActionButton';
 import { MatchBoard } from '../../components/MatchBoard';
 import { Page } from '../../components/Page';
 import { ProgressBar } from '../../components/ProgressBar';
 import { colors, sizes } from '../../constants/theme';
 import { ExercisePronunciation } from '../../features/audio/ExercisePronunciation';
+import { useFeedbackSounds } from '../../features/audio/useFeedbackSounds';
 import { useCourses } from '../../features/courses/CourseProvider';
 import type { Lesson } from '../../features/learning/types';
 import { correctAnswerLabel, gradeExercise } from '../../features/learning/engine';
@@ -14,93 +18,273 @@ import { isChoiceExercise, isListeningExercise, isWriteExercise } from '../../fe
 import { canStartLesson } from '../../features/progress/logic';
 import { useProgress } from '../../features/progress/ProgressProvider';
 
-export default function LessonScreen(){
-  const {lessonId}=useLocalSearchParams<{lessonId:string}>();
-  const {progress,ready,completeLesson}=useProgress();
-  const {lesson:findLesson,loadLesson,lessonIds}=useCourses();
-  const [fallback,setFallback]=useState<Lesson|undefined>();
-  const [loadError,setLoadError]=useState(false);
-  const lesson=(lessonId?findLesson(lessonId):undefined)??fallback;
-  const [index,setIndex]=useState(0);
-  const [answer,setAnswer]=useState('');
-  const [checked,setChecked]=useState(false);
-  const [correct,setCorrect]=useState(false);
-  const [count,setCount]=useState(0);
-  const [submitting,setSubmitting]=useState(false);
-  const [audioReady,setAudioReady]=useState(false);
-  const [skipped,setSkipped]=useState(false);
-  useEffect(()=>{
-    if(!lessonId||findLesson(lessonId))return;
-    let active=true;setLoadError(false);
-    void loadLesson(lessonId).then(l=>{if(active)setFallback(l);}).catch(()=>{if(active)setLoadError(true);});
-    return()=>{active=false;};
-  },[lessonId,findLesson,loadLesson]);
-  if(!ready)return <Page><ActivityIndicator style={{marginTop:80}} color={colors.primary}/></Page>;
-  if(!lesson&&lessonId&&!loadError)return <Page><ActivityIndicator style={{marginTop:80}} color={colors.primary}/><Text style={styles.message}>Carregando lição...</Text></Page>;
-  if(!lesson||!canStartLesson(lesson.id,lessonIds,progress))return <Page><View style={styles.missing}>
-    <Text style={styles.title}>{loadError?'Lição indisponível offline':'Lição indisponível'}</Text>
+const NAVY = '#071D34';
+const BLUE = '#246FEB';
+const GREEN = '#188361';
+const RED = '#B74D4D';
+
+export default function LessonScreen() {
+  const { lessonId } = useLocalSearchParams<{ lessonId: string }>();
+  const { progress, ready, completeLesson } = useProgress();
+  const { lesson: findLesson, loadLesson, lessonIds } = useCourses();
+  const [fallback, setFallback] = useState<Lesson | undefined>();
+  const [loadError, setLoadError] = useState(false);
+  const lesson = (lessonId ? findLesson(lessonId) : undefined) ?? fallback;
+  const [index, setIndex] = useState(0);
+  const [answer, setAnswer] = useState('');
+  const [checked, setChecked] = useState(false);
+  const [correct, setCorrect] = useState(false);
+  const [count, setCount] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
+  const [audioReady, setAudioReady] = useState(false);
+  const [skipped, setSkipped] = useState(false);
+  const scrollRef = useRef<ScrollView | null>(null);
+  const playedFeedback = useRef<string | null>(null);
+  const playFeedback = useFeedbackSounds();
+
+  useEffect(() => {
+    if (!lessonId || findLesson(lessonId)) return;
+    let active = true;
+    setLoadError(false);
+    void loadLesson(lessonId).then(l => { if (active) setFallback(l); })
+      .catch(() => { if (active) setLoadError(true); });
+    return () => { active = false; };
+  }, [lessonId, findLesson, loadLesson]);
+
+  // Sons somente depois de verificar; nunca ao escolher uma alternativa ou par.
+  useEffect(() => {
+    if (!checked || skipped) return;
+    const questionKey = `${lessonId ?? ''}:${index}`;
+    if (playedFeedback.current === questionKey) return;
+    playedFeedback.current = questionKey;
+    playFeedback(correct);
+  }, [checked, skipped, correct, index, lessonId, playFeedback]);
+
+  // A correção pode estar fora da área visível, especialmente após fechar o teclado.
+  // Rola novamente depois da animação de fechamento do teclado no Android/iOS.
+  useEffect(() => {
+    if (!checked) return;
+    const first = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
+    const second = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 300);
+    return () => { clearTimeout(first); clearTimeout(second); };
+  }, [checked, index]);
+
+  if (!ready) return <Page><ActivityIndicator style={{ marginTop: 80 }} color={colors.primary} /></Page>;
+  if (!lesson && lessonId && !loadError) return <Page>
+    <ActivityIndicator style={{ marginTop: 80 }} color={colors.primary} />
+    <Text style={styles.message}>Carregando lição...</Text>
+  </Page>;
+  if (!lesson || !canStartLesson(lesson.id, lessonIds, progress)) return <Page><View style={styles.missing}>
+    <Text style={styles.errorTitle}>{loadError ? 'Lição indisponível offline' : 'Lição indisponível'}</Text>
     <Text style={styles.message}>Se a unidade não foi baixada, conecte-se à internet para abrir a lição.</Text>
-    <ActionButton title="Voltar ao início" onPress={()=>router.replace('/')}/></View></Page>;
-  const question=lesson.exercises[index];
-  if(!question)return null;
-  const listening=isListeningExercise(question);
-  const choice=isChoiceExercise(question);
-  const writing=isWriteExercise(question);
-  const canVerify=answer.trim().length>0&&(!listening||audioReady);
-  const verify=()=>{
-    if(checked||!canVerify)return;
-    const right=gradeExercise(question,answer);setCorrect(right);setChecked(true);
-    if(right)setCount(c=>c+1);
+    <ActionButton title="Voltar ao início" onPress={() => router.replace('/')} />
+  </View></Page>;
+
+  const question = lesson.exercises[index];
+  if (!question) return null;
+  const listening = isListeningExercise(question);
+  const choice = isChoiceExercise(question);
+  const writing = isWriteExercise(question);
+  // É possível desfazer e refazer pares; a avaliação só acontece após todos serem ligados.
+  const matchReady = question.type !== 'match' || answer.split('|').filter(Boolean).length === question.pairs.length;
+  const canVerify = answer.trim().length > 0 && matchReady && (!listening || audioReady);
+
+  const verify = () => {
+    if (checked || !canVerify) return;
+    Keyboard.dismiss();
+    const right = gradeExercise(question, answer);
+    setCorrect(right);
+    setChecked(true);
+    if (right) setCount(c => c + 1);
   };
-  const next=async()=>{
-    if(submitting)return;
-    if(index<lesson.exercises.length-1){setIndex(v=>v+1);setAnswer('');setChecked(false);setCorrect(false);setAudioReady(false);setSkipped(false);return;}
+  const next = async () => {
+    if (submitting) return;
+    if (index < lesson.exercises.length - 1) {
+      setIndex(v => v + 1);
+      setAnswer(''); setChecked(false); setCorrect(false);
+      setAudioReady(false); setSkipped(false);
+      scrollRef.current?.scrollTo({ y: 0, animated: false });
+      return;
+    }
     setSubmitting(true);
-    try{
-      const xp=await completeLesson(lesson.id,count,lesson.exercises.length);
-      router.replace({pathname:'/result',params:{lessonId:lesson.id,correct:String(count),xp:String(xp)}});
-    }catch{Alert.alert('Não foi possível salvar','Tente novamente para preservar seu progresso.');setSubmitting(false);}
+    try {
+      const xp = await completeLesson(lesson.id, count, lesson.exercises.length);
+      router.replace({ pathname: '/result', params: { lessonId: lesson.id, correct: String(count), xp: String(xp) } });
+    } catch {
+      Alert.alert('Não foi possível salvar', 'Tente novamente para preservar seu progresso.');
+      setSubmitting(false);
+    }
   };
-  const audioExerciseId=listening?question.audioExerciseId:question.id;
-  return <Page><KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':undefined} style={{flex:1}}>
-    <View style={styles.top}><Pressable accessibilityLabel="Sair da lição" accessibilityRole="button" onPress={()=>router.back()} style={styles.close}>
-      <Text style={styles.cross}>×</Text></Pressable><ProgressBar value={index/lesson.exercises.length}/><Text style={styles.counter}>{index+1}/{lesson.exercises.length}</Text></View>
-    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.scroll}>
-      <Text style={styles.label}>{question.instruction.toUpperCase()}</Text><Text style={styles.prompt}>{question.prompt}</Text>
-      <Text style={styles.helper}>{question.type==='match'?'Ligue cada palavra à tradução correspondente':choice?'Selecione a alternativa correta':'Digite sua resposta abaixo'}</Text>
-      <ExercisePronunciation key={question.id} exerciseId={audioExerciseId} concealText={listening&&!checked} onReadyChange={listening?setAudioReady:undefined}/>
-      {choice?<View style={styles.choices}>{question.options.map((option,i)=><Pressable key={option.id} accessibilityRole="button"
-        accessibilityState={{selected:answer===option.id,disabled:checked}} disabled={checked} onPress={()=>setAnswer(option.id)}
-        style={[styles.choice,answer===option.id&&styles.selected]}><View style={[styles.optionNo,answer===option.id&&styles.optionNoActive]}>
-        <Text style={[styles.optionNoText,answer===option.id&&{color:'#FFFFFF'}]}>{i+1}</Text></View><Text style={styles.optionText}>{option.label}</Text></Pressable>)}</View>:null}
-      {writing?<TextInput key={question.id} accessibilityLabel="Sua resposta" placeholder={listening?'Escreva o que ouviu...':'Escreva aqui...'}
-        placeholderTextColor={colors.disabled} value={answer} onChangeText={setAnswer} editable={!checked} autoCapitalize="sentences" autoCorrect={false}
-        returnKeyType="done" style={styles.input}/>:null}
-      {question.type==='match'?<MatchBoard key={question.id} exercise={question} checked={checked} onAnswer={setAnswer}/>:null}
-      {listening&&!audioReady&&!checked?<Text style={styles.audioHint}>Aguarde o áudio carregar antes de verificar a resposta. Para áudios da nuvem, conecte-se à internet na primeira vez.</Text>:null}
-      {checked&&<View accessibilityLiveRegion="polite" style={[styles.feedback,correct?styles.good:styles.bad]}>
-        <Text style={[styles.feedbackTitle,{color:correct?colors.green:colors.red}]}>{skipped?'Atividade pulada':correct?'Muito bem! ✓':`Resposta: ${correctAnswerLabel(question)}`}</Text>
-        <Text style={styles.feedbackBody}>{skipped?'Não foi possível carregar a gravação. Você pode continuar; este exercício não gera pontos.':question.explanation}</Text></View>}
+
+  const audioExerciseId = listening ? question.audioExerciseId : question.id;
+  const exerciseHint = question.type === 'match' ? 'Relacione as expressões nas duas colunas.'
+    : choice ? 'Escolha a alternativa que faz sentido.' : 'Escreva sua resposta no campo abaixo.';
+  const feedbackTitle = skipped ? 'Atividade pulada' : correct ? 'Resposta correta!' : 'Vamos aprender com essa resposta';
+
+  return <Page><KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.layout}>
+    <View style={styles.header}>
+      <View style={styles.headerTop}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Sair da lição" onPress={() => router.back()} style={styles.close}>
+          <Text style={styles.cross}>×</Text>
+        </Pressable>
+        <View style={styles.headerLabel}>
+          <Text style={styles.headerEyebrow}>ITALIANO · A1</Text>
+          <Text style={styles.headerTitle} numberOfLines={1}>{lesson.title}</Text>
+        </View>
+        <Text style={styles.counter}>{index + 1}<Text style={styles.counterMuted}>/{lesson.exercises.length}</Text></Text>
+      </View>
+      <ProgressBar value={(index + (checked ? 1 : 0)) / lesson.exercises.length} />
+    </View>
+
+    <ScrollView ref={scrollRef} keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}
+      onContentSizeChange={() => { if (checked) scrollRef.current?.scrollToEnd({ animated: true }); }}>
+      <View style={styles.promptCard}>
+        <View pointerEvents="none" style={styles.cornerRing} />
+        <Text style={styles.cardEyebrow}>QUESTÃO {String(index + 1).padStart(2, '0')}  ·  {question.instruction.toUpperCase()}</Text>
+        <Text style={styles.prompt}>{question.prompt}</Text>
+        <Text style={styles.cardHint}>{exerciseHint}</Text>
+      </View>
+
+      <ExercisePronunciation key={question.id} exerciseId={audioExerciseId}
+        concealText={listening && !checked} onReadyChange={listening ? setAudioReady : undefined} />
+
+      {choice && <View style={styles.choices}>
+        <Text style={styles.sectionLabel}>SUA RESPOSTA</Text>
+        {question.options.map((option, i) => {
+          const chosen = answer === option.id;
+          const showRight = checked && option.id === question.correctOptionId;
+          const showWrong = checked && chosen && !showRight;
+          return <Pressable key={option.id} accessibilityRole="button"
+            accessibilityState={{ selected: chosen, disabled: checked }}
+            accessibilityLabel={`Opção ${i + 1}: ${option.label}${checked && showRight ? ', correta' : checked && showWrong ? ', incorreta' : ''}`}
+            disabled={checked} onPress={() => setAnswer(option.id)}
+            style={({ pressed }) => [styles.choice, chosen && !checked && styles.selected,
+              showRight && styles.rightChoice, showWrong && styles.wrongChoice, pressed && styles.pressed]}>
+            <View style={[styles.optionNo, chosen && !checked && styles.numberSelected,
+              showRight && styles.numberRight, showWrong && styles.numberWrong]}>
+              <Text style={[styles.optionNoText, (chosen || showRight) && styles.numberWhite]}>{showRight ? '✓' : showWrong ? '×' : i + 1}</Text>
+            </View>
+            <Text style={[styles.optionText, showRight && styles.rightText, showWrong && styles.wrongText]}>{option.label}</Text>
+          </Pressable>;
+        })}
+      </View>}
+
+      {writing && <View style={styles.writeSection}>
+        <Text style={styles.sectionLabel}>SUA RESPOSTA</Text>
+        <TextInput key={question.id} accessibilityLabel="Sua resposta"
+          placeholder={listening ? 'Escreva o que ouviu...' : 'Escreva aqui...'}
+          placeholderTextColor="#94A3B7" value={answer} onChangeText={setAnswer}
+          editable={!checked} autoCapitalize="sentences" autoCorrect={false}
+          returnKeyType="done" style={[styles.input, checked && (correct ? styles.inputCorrect : styles.inputWrong)]} />
+      </View>}
+
+      {question.type === 'match' && <MatchBoard key={question.id} exercise={question} checked={checked} onAnswer={setAnswer} />}
+
+      {listening && !audioReady && !checked && <Text style={styles.audioHint}>
+        Aguarde a gravação carregar para responder. Para conteúdo da nuvem, conecte-se à internet na primeira vez.
+      </Text>}
+
+      {checked && <View accessibilityLiveRegion="polite" style={[styles.feedback,
+        skipped ? styles.skippedPanel : correct ? styles.good : styles.bad]}>
+        <View style={styles.feedbackTop}>
+          <View style={[styles.feedbackIcon, skipped ? styles.skipIcon : correct ? styles.goodIcon : styles.badIcon]}>
+            <Text style={styles.feedbackSymbol}>{skipped ? '–' : correct ? '✓' : '×'}</Text>
+          </View>
+          <View style={styles.feedbackCopy}>
+            <Text style={[styles.feedbackTitle, skipped ? styles.skippedTitle : correct ? styles.goodTitle : styles.badTitle]}>{feedbackTitle}</Text>
+            <Text style={styles.feedbackStatus}>{skipped ? 'Sem pontuação nesta questão' : correct ? 'Muito bem! Continue avançando.' : 'Confira a resposta e continue praticando.'}</Text>
+          </View>
+        </View>
+        {!skipped && !correct && <View style={styles.correctAnswer}>
+          <Text style={styles.answerLabel}>RESPOSTA CORRETA</Text>
+          <Text selectable style={styles.answerText}>{correctAnswerLabel(question)}</Text>
+        </View>}
+        <Text style={styles.feedbackBody}>{skipped
+          ? 'A gravação não estava disponível. Você pode continuar sem ganhar pontos nesta atividade.'
+          : question.explanation}</Text>
+      </View>}
     </ScrollView>
-    <View style={styles.bottom}>{listening&&!audioReady&&!checked?<Pressable accessibilityRole="button" accessibilityLabel="Pular atividade sem áudio, sem ganhar pontos"
-      onPress={()=>{setSkipped(true);setCorrect(false);setChecked(true);}} style={styles.skip}><Text style={styles.skipText}>Pular atividade sem áudio</Text></Pressable>:null}
-      <ActionButton title={!checked?'Verificar resposta':submitting?'Salvando...':index===lesson.exercises.length-1?'Concluir lição':'Continuar'}
-        disabled={submitting||(!checked&&!canVerify)} onPress={checked?()=>{void next();}:verify}/></View>
+
+    <View style={styles.bottom}>
+      {listening && !audioReady && !checked && <Pressable accessibilityRole="button"
+        accessibilityLabel="Pular atividade sem áudio, sem ganhar pontos"
+        onPress={() => { Keyboard.dismiss(); setSkipped(true); setCorrect(false); setChecked(true); }}
+        style={styles.skip}><Text style={styles.skipText}>Pular atividade sem áudio</Text></Pressable>}
+      <Pressable accessibilityRole="button" accessibilityState={{ disabled: submitting || (!checked && !canVerify) }}
+        disabled={submitting || (!checked && !canVerify)} onPress={checked ? () => { void next(); } : verify}
+        style={({ pressed }) => [styles.primaryAction, checked && (correct ? styles.successAction : styles.continueAction),
+          (submitting || (!checked && !canVerify)) && styles.disabledAction, pressed && styles.pressed]}>
+        <Text style={styles.actionText}>{!checked ? 'Verificar resposta' : submitting ? 'Salvando...' : index === lesson.exercises.length - 1 ? 'Concluir lição' : 'Continuar'}</Text>
+        <Text style={styles.actionArrow}>→</Text>
+      </Pressable>
+    </View>
   </KeyboardAvoidingView></Page>;
 }
-const styles=StyleSheet.create({
-  missing:{flex:1,justifyContent:'center',gap:18,paddingHorizontal:sizes.page},title:{fontSize:27,fontWeight:'900',color:colors.ink},
-  message:{textAlign:'center',marginTop:12,fontSize:14,color:colors.muted,lineHeight:21},top:{paddingHorizontal:sizes.page,paddingVertical:14,flexDirection:'row',alignItems:'center',gap:14},
-  close:{width:30,height:35,justifyContent:'center'},cross:{fontSize:30,fontWeight:'300',color:colors.muted},counter:{fontWeight:'700',color:colors.muted,fontSize:13},
-  scroll:{paddingHorizontal:sizes.page,paddingTop:42,paddingBottom:28,flexGrow:1},label:{fontSize:12,fontWeight:'900',letterSpacing:1.5,color:colors.primary},
-  prompt:{fontSize:31,fontWeight:'900',color:colors.ink,letterSpacing:-.7,marginTop:15},helper:{color:colors.muted,fontSize:15,marginTop:11},
-  audioHint:{color:colors.muted,fontSize:12,lineHeight:18,marginTop:12},choices:{marginTop:35,gap:12},
-  choice:{borderRadius:17,backgroundColor:'#FFFFFF',borderWidth:2,borderColor:colors.line,padding:15,flexDirection:'row',gap:15,alignItems:'center',minHeight:70},
-  selected:{borderColor:colors.primary,backgroundColor:colors.primarySoft},optionNo:{width:33,height:33,borderRadius:11,backgroundColor:colors.background,alignItems:'center',justifyContent:'center'},
-  optionNoActive:{backgroundColor:colors.primary},optionNoText:{fontWeight:'800',color:colors.muted},optionText:{fontSize:17,color:colors.ink,fontWeight:'700',flex:1},
-  input:{marginTop:35,borderRadius:17,backgroundColor:'#FFFFFF',padding:18,minHeight:64,borderColor:colors.line,borderWidth:2,fontSize:20,color:colors.ink},
-  skip:{alignItems:'center',paddingVertical:10,marginBottom:6},skipText:{color:colors.muted,fontSize:14,fontWeight:'700'},
-  feedback:{marginTop:28,padding:18,borderRadius:16},good:{backgroundColor:colors.greenSoft},bad:{backgroundColor:colors.redSoft},
-  feedbackTitle:{fontWeight:'900',fontSize:17},feedbackBody:{color:colors.ink,fontSize:14,lineHeight:21,marginTop:8},
-  bottom:{paddingHorizontal:sizes.page,paddingTop:14,paddingBottom:5,borderTopWidth:1,borderTopColor:colors.line,backgroundColor:colors.background},
+
+const styles = StyleSheet.create({
+  layout: { flex: 1 },
+  missing: { flex: 1, justifyContent: 'center', gap: 18, paddingHorizontal: sizes.page },
+  errorTitle: { fontSize: 27, fontWeight: '900', color: colors.ink },
+  message: { textAlign: 'center', marginTop: 12, fontSize: 14, color: colors.muted, lineHeight: 21 },
+  header: { backgroundColor: '#F7F8FC', paddingHorizontal: sizes.page, paddingTop: 10, paddingBottom: 17, gap: 17 },
+  headerTop: { flexDirection: 'row', alignItems: 'center', gap: 13 },
+  close: { width: 38, height: 38, borderRadius: 13, backgroundColor: '#E7ECF3', alignItems: 'center', justifyContent: 'center' },
+  cross: { fontSize: 27, fontWeight: '400', color: '#526B86', marginTop: -2 },
+  headerLabel: { flex: 1, gap: 3 },
+  headerEyebrow: { fontSize: 9, letterSpacing: 1.45, fontWeight: '900', color: '#5A7C9F' },
+  headerTitle: { color: NAVY, fontWeight: '800', fontSize: 14 },
+  counter: { fontSize: 19, fontWeight: '900', color: NAVY },
+  counterMuted: { fontSize: 13, fontWeight: '700', color: '#8B9CB1' },
+  scroll: { flexGrow: 1, paddingHorizontal: sizes.page, paddingTop: 17, paddingBottom: 42 },
+  promptCard: { backgroundColor: NAVY, borderRadius: 24, paddingHorizontal: 23, paddingVertical: 26, overflow: 'hidden', minHeight: 164 },
+  cornerRing: { position: 'absolute', width: 190, height: 190, right: -113, top: -108, borderRadius: 95, borderWidth: 24, borderColor: 'rgba(81,163,255,0.08)' },
+  cardEyebrow: { color: '#F4BD79', fontSize: 10, fontWeight: '900', letterSpacing: 1.3, lineHeight: 16 },
+  prompt: { color: '#FFFFFF', fontWeight: '900', fontSize: 33, letterSpacing: -1.15, lineHeight: 41, marginTop: 15 },
+  cardHint: { color: '#B9CDE3', fontSize: 13, lineHeight: 20, marginTop: 11 },
+  sectionLabel: { color: '#647F9C', fontSize: 10, fontWeight: '900', letterSpacing: 1.5, marginBottom: 11 },
+  choices: { marginTop: 28, gap: 11 },
+  choice: { borderRadius: 18, backgroundColor: '#FFFFFF', borderWidth: 1.5, borderColor: '#E0E6EF', paddingHorizontal: 16, paddingVertical: 12, flexDirection: 'row', gap: 15, alignItems: 'center', minHeight: 68 },
+  selected: { borderColor: BLUE, backgroundColor: '#EAF2FF' },
+  rightChoice: { borderColor: '#3AAF87', backgroundColor: '#E9F9F3' },
+  wrongChoice: { borderColor: '#D97E78', backgroundColor: '#FFF0EF' },
+  optionNo: { width: 37, height: 37, borderRadius: 12, backgroundColor: '#EEF2F7', alignItems: 'center', justifyContent: 'center' },
+  numberSelected: { backgroundColor: BLUE },
+  numberRight: { backgroundColor: GREEN },
+  numberWrong: { backgroundColor: RED },
+  optionNoText: { color: '#697F98', fontSize: 15, fontWeight: '900' },
+  numberWhite: { color: '#FFFFFF' },
+  optionText: { fontSize: 16, color: NAVY, fontWeight: '800', flex: 1 },
+  rightText: { color: '#146748' }, wrongText: { color: '#9C4545' },
+  writeSection: { marginTop: 28 },
+  input: { borderRadius: 17, backgroundColor: '#FFFFFF', padding: 19, minHeight: 65, borderColor: '#DEE5EF', borderWidth: 1.5, fontSize: 19, color: NAVY, fontWeight: '700' },
+  inputCorrect: { borderColor: '#3AAF87', backgroundColor: '#E9F9F3' },
+  inputWrong: { borderColor: '#D97E78', backgroundColor: '#FFF0EF' },
+  audioHint: { color: colors.muted, fontSize: 12, lineHeight: 19, marginTop: 14 },
+  feedback: { marginTop: 27, padding: 18, borderRadius: 21, borderWidth: 1.5 },
+  good: { backgroundColor: '#EBFAF4', borderColor: '#9DDFC7' },
+  bad: { backgroundColor: '#FFF1EF', borderColor: '#F0C6C0' },
+  skippedPanel: { backgroundColor: '#FFF7E9', borderColor: '#EED6A6' },
+  feedbackTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  feedbackIcon: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  goodIcon: { backgroundColor: GREEN }, badIcon: { backgroundColor: RED }, skipIcon: { backgroundColor: '#A97D37' },
+  feedbackSymbol: { color: '#FFFFFF', fontSize: 24, fontWeight: '900' },
+  feedbackCopy: { flex: 1, gap: 3 },
+  feedbackTitle: { fontWeight: '900', fontSize: 16, lineHeight: 21 },
+  goodTitle: { color: '#126E50' }, badTitle: { color: '#A34441' }, skippedTitle: { color: '#926625' },
+  feedbackStatus: { color: '#667C90', fontSize: 12, lineHeight: 17 },
+  correctAnswer: { marginTop: 16, borderTopWidth: 1, borderTopColor: 'rgba(134,97,97,0.18)', paddingTop: 15, gap: 7 },
+  answerLabel: { color: '#99514E', fontWeight: '900', letterSpacing: 1.1, fontSize: 10 },
+  answerText: { color: NAVY, fontWeight: '800', fontSize: 16, lineHeight: 24 },
+  feedbackBody: { color: '#40556B', fontSize: 13, lineHeight: 21, marginTop: 15 },
+  bottom: { paddingHorizontal: sizes.page, paddingTop: 13, paddingBottom: 7, borderTopWidth: 1, borderTopColor: '#E3EAF2', backgroundColor: '#F7F8FC' },
+  primaryAction: { backgroundColor: BLUE, minHeight: 58, borderRadius: 18, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
+  successAction: { backgroundColor: GREEN },
+  continueAction: { backgroundColor: '#15375C' },
+  disabledAction: { opacity: 0.4 },
+  actionText: { color: '#FFFFFF', fontWeight: '900', fontSize: 16 },
+  actionArrow: { position: 'absolute', right: 19, fontSize: 23, fontWeight: '900', color: '#FFFFFF' },
+  pressed: { opacity: 0.79 },
+  skip: { alignItems: 'center', paddingVertical: 11, marginBottom: 5 },
+  skipText: { color: '#6B7F98', fontSize: 13, fontWeight: '700' },
 });
