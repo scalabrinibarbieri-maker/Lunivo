@@ -28,7 +28,7 @@ const RED = '#B74D4D';
 export default function LessonScreen() {
   const { lessonId } = useLocalSearchParams<{ lessonId: string }>();
   const { progress, ready, completeLesson } = useProgress();
-  const { lesson: findLesson, loadLesson, lessonIds } = useCourses();
+  const { lesson: findLesson, loadLesson, lessonIds, imageUri } = useCourses();
   const [fallback, setFallback] = useState<Lesson | undefined>();
   const [loadError, setLoadError] = useState(false);
   const lesson = (lessonId ? findLesson(lessonId) : undefined) ?? fallback;
@@ -158,7 +158,7 @@ export default function LessonScreen() {
 
       {question.type === 'info' && <View style={styles.infoSection}>
         {question.image && <View style={styles.infoImageCard}>
-          {!infoImageError ? <Image source={{ uri: question.image.url }} style={styles.infoImage} resizeMode="contain"
+          {!infoImageError ? <Image source={{ uri: imageUri(lesson.id, question.image.url) }} style={styles.infoImage} resizeMode="contain"
             accessible accessibilityLabel={question.image.alt} onError={() => setInfoImageError(true)} />
             : <View style={styles.infoImageFallback}><Text style={styles.infoImageFallbackText}>Imagem não disponível. O conteúdo continua abaixo.</Text></View>}
           {question.image.caption && <Text style={styles.infoCaption}>{question.image.caption}</Text>}

@@ -1,10 +1,12 @@
 import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, AppState, Pressable, RefreshControl, ScrollView,
+  ActivityIndicator, Alert, Animated, AppState, Easing, Pressable, RefreshControl, ScrollView,
   StyleSheet, Text, View, Image,
 } from 'react-native';
 import { Page } from '../components/Page';
+import { PremiumEmblem } from '../components/PremiumEmblem';
+import { PremiumInsightSheet, type InsightKind } from '../components/PremiumInsightSheet';
 import { LESSONS } from '../features/learning/data';
 import { useCourses } from '../features/courses/CourseProvider';
 import type { CourseUnitSummary } from '../features/courses/schema';
@@ -132,6 +134,11 @@ export default function Home() {
   const { settings } = useOnboarding();
   const { catalog, ready: coursesReady, refreshing, refresh, downloaded, download, remove, loadUnit } = useCourses();
   const [busy, setBusy] = useState(false);
+  const [insight, setInsight] = useState<InsightKind | null>(null);
+  const entrance = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(entrance, { toValue: 1, duration: 460, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+  }, [entrance]);
   const [today, setToday] = useState(() => localStudyDay(new Date()));
   useEffect(() => {
     const subscription = AppState.addEventListener('change', state => {
@@ -223,27 +230,31 @@ export default function Home() {
                 <Text style={styles.languageFlag}>🇮🇹</Text>
                 <Text style={styles.languageLabel}>ITALIANO  <Text style={styles.languageLevel}>A1</Text></Text>
               </View>
-              <View style={styles.xpChip}>
-                <View style={styles.xpGem} />
+              <Pressable accessibilityRole="button" accessibilityLabel={`Detalhes da experiência, ${progress.totalXp} XP`} onPress={() => setInsight('xp')}
+                style={({ pressed }) => [styles.xpChip, pressed && styles.pressed]}>
+                <PremiumEmblem kind="xp" size={28} />
                 <Text style={styles.xpNumber}>{progress.totalXp} XP</Text>
-              </View>
+              </Pressable>
             </View>
 
-            <View style={styles.streakBanner} accessibilityLabel={`Sequência de ${streak.current} dias. ${streak.studiedToday ? 'Estudo de hoje concluído.' : 'Estude hoje para manter a sequência.'}`}>
-              <View style={styles.streakFlame}><Text style={styles.streakFlameIcon}>🔥</Text></View>
+            <Pressable accessibilityRole="button" onPress={() => setInsight('streak')}
+              style={({ pressed }) => [styles.streakBanner, pressed && styles.pressed]}
+              accessibilityLabel={`Ver sequência de ${streak.current} dias. ${streak.studiedToday ? 'Estudo de hoje concluído.' : 'Estude hoje para manter a sequência.'}`}>
+              <View style={styles.streakFlame}><PremiumEmblem kind="streak" size={39} /></View>
               <View style={styles.streakCopy}>
                 <Text style={styles.streakTitle}>{streak.current} {streak.current === 1 ? 'dia seguido' : 'dias seguidos'}</Text>
                 <Text style={styles.streakSubtitle}>{streak.studiedToday ? 'Sua sequência está garantida hoje' : streak.current > 0 ? 'Uma lição hoje mantém sua sequência' : 'Conclua uma lição e comece sua sequência'}</Text>
               </View>
               <Text style={styles.streakToday}>{streak.studiedToday ? '✓ HOJE' : 'HOJE'}</Text>
-            </View>
+            </Pressable>
 
             <View style={styles.heroIntroduction}>
               <Text style={styles.sectionOverline}>O SEU PRÓXIMO PASSO</Text>
               <Text style={styles.introductionTitle}>Seu caminho continua.</Text>
             </View>
 
-            <View style={styles.heroCard}>
+            <Animated.View style={[styles.heroCard, { opacity: entrance,
+              transform: [{ translateY: entrance.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) }] }]}>
               <View pointerEvents="none" style={styles.heroCircleBig} />
               <View pointerEvents="none" style={styles.heroCircleSmall} />
               <View style={styles.heroCardTop}>
@@ -271,7 +282,7 @@ export default function Home() {
                 <Text style={styles.startButtonLabel}>{allDone ? 'Revisar lição' : 'Continuar aprendendo'}</Text>
                 <View style={styles.startButtonArrow}><Text style={styles.startArrowText}>→</Text></View>
               </Pressable>
-            </View>
+            </Animated.View>
 
             <View style={styles.miniStats}>
               <View style={styles.miniStat}>
@@ -339,7 +350,7 @@ export default function Home() {
                     <Text style={styles.availabilityText}>{offline ? 'Salva offline' : 'Conteúdo online'}</Text>
                   </View>
                   {!offline ? <Pressable accessibilityRole="button" accessibilityLabel={`Baixar ${unit.title} para estudar offline`}
-                    disabled={busy} onPress={() => { void run(() => download(unit), 'Confira a conexão. Todas as gravações obrigatórias precisam estar disponíveis.'); }}>
+                    disabled={busy} onPress={() => { void run(() => download(unit), 'Confira a conexão. As gravações e imagens explicativas precisam estar disponíveis para baixar a unidade.'); }}>
                     <Text style={styles.remoteActionLabel}>{busy ? 'Aguarde…' : '↓ Baixar unidade'}</Text>
                   </Pressable> : <Pressable accessibilityRole="button" accessibilityLabel={`Remover download de ${unit.title}`}
                     disabled={busy} onPress={() => removeDownloadedUnit(unit)}>
@@ -383,6 +394,8 @@ export default function Home() {
           </View>
         </View>
       </View>
+      <PremiumInsightSheet kind={insight} onClose={() => setInsight(null)}
+        totalXp={progress.totalXp} streak={streak.current} studiedToday={streak.studiedToday} />
     </Page>
   );
 }
@@ -404,12 +417,12 @@ const styles = StyleSheet.create({
   languageFlag: { fontSize: 17 },
   languageLabel: { color: '#E9F4FF', fontSize: 11, fontWeight: '900', letterSpacing: 0.8 },
   languageLevel: { color: '#8FCBFF' },
-  xpChip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 13, paddingVertical: 11, borderRadius: 14, backgroundColor: '#223A4A', gap: 8 },
+  xpChip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 17, backgroundColor: '#193954', borderWidth: 1, borderColor: '#355F85', gap: 6 },
   xpGem: { width: 9, height: 9, transform: [{ rotate: '45deg' }], backgroundColor: GOLD, borderRadius: 2 },
   xpNumber: { fontSize: 12, fontWeight: '900', color: '#FFE0AF' },
   streakBanner: { marginTop: 17, paddingVertical: 13, paddingHorizontal: 14, backgroundColor: '#102E4F',
     borderWidth: 1, borderColor: '#30547A', borderRadius: 18, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  streakFlame: { width: 41, height: 41, borderRadius: 14, backgroundColor: '#173D63', alignItems: 'center', justifyContent: 'center' },
+  streakFlame: { width: 45, height: 45, borderRadius: 15, backgroundColor: '#1A4161', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#41617D' },
   streakFlameIcon: { fontSize: 22 },
   streakCopy: { flex: 1 },
   streakTitle: { color: '#F5F8FF', fontSize: 15, fontWeight: '900' },

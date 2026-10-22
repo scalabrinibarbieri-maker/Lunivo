@@ -2,10 +2,11 @@ import React, {createContext,useCallback,useContext,useEffect,useMemo,useRef,use
 import {Directory,File,Paths} from 'expo-file-system';
 import Storage from 'expo-sqlite/kv-store';
 import {LESSONS} from '../learning/data';
-import type {Lesson,Exercise} from '../learning/types';
+import type {Lesson} from '../learning/types';
 import {clipForExercise} from '../audio/catalog';
 import {cloudClipForExercise,readCachedAudioManifest,refreshAudioManifest} from '../audio/remoteCatalog';
 import {prepareCloudAudio} from '../audio/remoteCache';
+import {allImagesAvailable,localImageUri,prepareUnitImages,removeUnitImages} from './imageCache';
 import {EMPTY_CATALOG,parseCourseCatalog,parseCourseUnit,type CourseCatalog,type CourseUnit,type CourseUnitSummary} from './schema';
 
 const BASE_URL='https://lunivo-api-dev.scalabrinibarbieri.workers.dev';
@@ -19,12 +20,13 @@ type CourseContextType={
   download:(unit:CourseUnitSummary)=>Promise<void>; remove:(unit:CourseUnitSummary)=>Promise<void>;
   loadUnit:(unit:CourseUnitSummary)=>Promise<CourseUnit>;
   lesson:(id:string)=>Lesson|undefined; loadLesson:(id:string)=>Promise<Lesson>;
+  imageUri:(lessonId:string,url:string)=>string;
   lessonIds:string[];
 };
 const Context=createContext<CourseContextType|null>(null);
 function fileFor(unit:CourseUnitSummary){return new File(CONTENT_DIR,`${unit.id}-r${unit.revision}.json`);}
 async function fetchJson(url:string):Promise<unknown>{
-  const controller=new AbortController(); const timeout=setTimeout(()=>controller.abort(),CACHE_TIMEOUT_MS);
+  const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),CACHE_TIMEOUT_MS);
   try{const response=await fetch(url,{signal:controller.signal});if(!response.ok)throw new Error(`CURSO_HTTP_${response.status}`);
     const text=await response.text();if(text.length>512*1024)throw new Error('CURSO_MUITO_GRANDE');return JSON.parse(text);
   }finally{clearTimeout(timeout);}
@@ -59,9 +61,22 @@ export function CourseProvider({children}:{children:React.ReactNode}){
     return ()=>{active=false;};
   },[refresh]);
   useEffect(()=>{
-    const found:Record<string,boolean>={};
-    for(const unit of catalog.units){try{if(fileFor(unit).exists)found[keyOf(unit)]=true;}catch{/* proteção filesystem */}}
-    setStored(found);
+    let active=true;
+    void (async()=>{
+      const found:Record<string,boolean>={};
+      for(const unit of catalog.units){
+        try{
+          const file=fileFor(unit);
+          if(!file.exists)continue;
+          // Uma unidade salva antes da V15 pode ter imagens ausentes. Nessa situação
+          // não será apresentada como totalmente offline até baixar de novo.
+          const parsed=parseCourseUnit(JSON.parse(await file.text()),unit);
+          if(allImagesAvailable(parsed,keyOf(unit)))found[keyOf(unit)]=true;
+        }catch{/* arquivos inválidos ou mídia ausente não recebem selo offline */}
+      }
+      if(active)setStored(found);
+    })();
+    return ()=>{active=false;};
   },[catalog]);
 
   const loadUnit=useCallback((unit:CourseUnitSummary):Promise<CourseUnit>=>{
@@ -73,13 +88,11 @@ export function CourseProvider({children}:{children:React.ReactNode}){
       if(saved.exists){
         try{
           const parsed=parseCourseUnit(JSON.parse(await saved.text()),unit);
-          setPackages(old=>({...old,[key]:parsed}));
-          return parsed;
+          setPackages(old=>({...old,[key]:parsed}));return parsed;
         }catch(e){console.warn('Unidade salva inválida, tentando versão online',e);}
       }
       const parsed=parseCourseUnit(await fetchJson(`${BASE_URL}/v1/courses/unit/${unit.id}/${unit.revision}`),unit);
-      setPackages(old=>({...old,[key]:parsed}));
-      return parsed;
+      setPackages(old=>({...old,[key]:parsed}));return parsed;
     })();
     busy.current[key]=task;
     void task.finally(()=>{delete busy.current[key];}).catch(()=>{});
@@ -87,20 +100,21 @@ export function CourseProvider({children}:{children:React.ReactNode}){
   },[packages]);
   const download=useCallback(async(unit:CourseUnitSummary)=>{
     const content=await loadUnit(unit);
-    // Baixa primeiro cada fala necessária para um exercício de escuta. Não declara
-    // unidade offline se qualquer áudio obrigatório estiver ausente.
+    // Mantém a garantia anterior para todas as gravações de escuta.
     const manifest=await refreshAudioManifest(true).catch(()=>readCachedAudioManifest());
     const toFetch=new Map<string,ReturnType<typeof cloudClipForExercise>>();
     for(const lesson of content.lessons){
       for(const exercise of lesson.exercises){
         const target=(exercise.type==='listen_choice'||exercise.type==='listen_write')?exercise.audioExerciseId:exercise.id;
-        if(clipForExercise(target))continue;
+        if(exercise.type==='info'||clipForExercise(target))continue;
         const cloud=cloudClipForExercise(manifest,target);
         if((exercise.type==='listen_choice'||exercise.type==='listen_write')&&!cloud)throw new Error('AUDIO_OBRIGATORIO_NAO_PUBLICADO');
         if(cloud)toFetch.set(cloud.id,cloud);
       }
     }
     for(const audio of toFetch.values()){if(audio)await prepareCloudAudio(audio);}
+    // A transferência das imagens é OBRIGATÓRIA antes de confirmar offline.
+    await prepareUnitImages(content,keyOf(unit));
     if(!CONTENT_DIR.exists)CONTENT_DIR.create({idempotent:true,intermediates:true});
     const file=fileFor(unit);
     file.write(JSON.stringify(content),{encoding:'utf8'});
@@ -108,8 +122,9 @@ export function CourseProvider({children}:{children:React.ReactNode}){
   },[loadUnit]);
   const remove=useCallback(async(unit:CourseUnitSummary)=>{
     const file=fileFor(unit);if(file.exists)file.delete();
+    removeUnitImages(keyOf(unit));
     setStored(prev=>{const next={...prev};delete next[keyOf(unit)];return next;});
-    // Gravações compartilhadas por diferentes lições ficam no cache de áudio.
+    // Áudios compartilhados permanecem no cache local, como na V14.
   },[]);
   const lesson=useCallback((id:string):Lesson|undefined=>{
     const included=LESSONS.find(x=>x.id===id);if(included)return included;
@@ -125,9 +140,13 @@ export function CourseProvider({children}:{children:React.ReactNode}){
     if(!match)throw new Error('LICAO_NAO_PUBLICADA');
     return match;
   },[catalog,loadUnit]);
+  const imageUri=useCallback((lessonId:string,url:string):string=>{
+    const unit=catalog.units.find(u=>u.lessons.some(l=>l.id===lessonId));
+    return unit?localImageUri(keyOf(unit),url)??url:url;
+  },[catalog]);
   const lessonIds=useMemo(()=>[...LESSONS.map(l=>l.id),...catalog.units.flatMap(u=>u.lessons.map(l=>l.id))],[catalog]);
-  const value=useMemo(()=>({catalog,ready,refreshing,refresh,downloaded:(u:CourseUnitSummary)=>Boolean(stored[keyOf(u)]),download,remove,loadUnit,lesson,loadLesson,lessonIds}),
-    [catalog,ready,refreshing,refresh,stored,download,remove,loadUnit,lesson,loadLesson,lessonIds]);
+  const value=useMemo(()=>({catalog,ready,refreshing,refresh,downloaded:(u:CourseUnitSummary)=>Boolean(stored[keyOf(u)]),download,remove,loadUnit,lesson,loadLesson,imageUri,lessonIds}),
+    [catalog,ready,refreshing,refresh,stored,download,remove,loadUnit,lesson,loadLesson,imageUri,lessonIds]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 export function useCourses(){const ctx=useContext(Context);if(!ctx)throw new Error('useCourses requer CourseProvider');return ctx;}
