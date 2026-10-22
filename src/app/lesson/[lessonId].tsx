@@ -43,6 +43,8 @@ export default function LessonScreen() {
   const [count, setCount] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [audioReady, setAudioReady] = useState(false);
+  const [audioUnavailable, setAudioUnavailable] = useState(false);
+  const [audioTakingLong, setAudioTakingLong] = useState(false);
   const [skipped, setSkipped] = useState(false);
   const [inputMode, setInputMode] = useState<'keyboard' | 'letters'>('keyboard');
   const [infoImageError, setInfoImageError] = useState(false);
@@ -76,6 +78,15 @@ export default function LessonScreen() {
     const second = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 300);
     return () => { clearTimeout(first); clearTimeout(second); };
   }, [checked, index]);
+
+  // Não exponha falha de rede durante o carregamento normal nem durante seekTo.
+  // Após uma espera prolongada, permite seguir sem áudio caso o download trave.
+  useEffect(() => {
+    setAudioTakingLong(false);
+    if (audioReady || checked) return;
+    const timer = setTimeout(() => setAudioTakingLong(true), 12000);
+    return () => clearTimeout(timer);
+  }, [audioReady, checked, index]);
 
   if (!ready) return <Page><ActivityIndicator style={{ marginTop: 80 }} color={colors.primary} /></Page>;
   if (!lesson && lessonId && !loadError) return <Page>
@@ -115,7 +126,7 @@ export default function LessonScreen() {
     if (index < lesson.exercises.length - 1) {
       setIndex(v => v + 1);
       setAnswer(''); setChecked(false); setCorrect(false); setSpellingCorrection(null);
-      setAudioReady(false); setSkipped(false); setInputMode('keyboard'); setInfoImageError(false);
+      setAudioReady(false); setAudioUnavailable(false); setAudioTakingLong(false); setSkipped(false); setInputMode('keyboard'); setInfoImageError(false);
       scrollRef.current?.scrollTo({ y: 0, animated: false });
       return;
     }
@@ -174,7 +185,8 @@ export default function LessonScreen() {
       </View>}
 
       {!informative && <ExercisePronunciation key={question.id} exerciseId={audioExerciseId}
-        concealText={listening && !checked} onReadyChange={listening ? setAudioReady : undefined} />}
+        concealText={listening && !checked} onReadyChange={listening ? setAudioReady : undefined}
+        onUnavailableChange={listening ? setAudioUnavailable : undefined} />}
 
       {choice && <View style={styles.choices}>
         <Text style={styles.sectionLabel}>SUA RESPOSTA</Text>
@@ -228,8 +240,9 @@ export default function LessonScreen() {
 
       {question.type === 'match' && <MatchBoard key={question.id} exercise={question} checked={checked} onAnswer={setAnswer} />}
 
-      {listening && !audioReady && !checked && <Text style={styles.audioHint}>
-        Aguarde a gravação carregar para responder. Para conteúdo da nuvem, conecte-se à internet na primeira vez.
+      {listening && !audioReady && (audioUnavailable || audioTakingLong) && !checked && <Text style={styles.audioHint}>
+        {audioUnavailable ? 'Esta gravação está indisponível no momento. Verifique a conexão ou continue sem áudio.'
+          : 'A gravação está demorando para carregar. Você pode continuar sem áudio se preferir.'}
       </Text>}
 
       {checked && !informative && <View accessibilityLiveRegion="polite" style={[styles.feedback,
@@ -258,7 +271,7 @@ export default function LessonScreen() {
     </ScrollView>
 
     <View style={styles.bottom}>
-      {listening && !audioReady && !checked && <Pressable accessibilityRole="button"
+      {listening && !audioReady && (audioUnavailable || audioTakingLong) && !checked && <Pressable accessibilityRole="button"
         accessibilityLabel="Pular atividade sem áudio, sem ganhar pontos"
         onPress={() => { Keyboard.dismiss(); setSkipped(true); setCorrect(false); setChecked(true); }}
         style={styles.skip}><Text style={styles.skipText}>Pular atividade sem áudio</Text></Pressable>}
