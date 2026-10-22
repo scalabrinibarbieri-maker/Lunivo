@@ -1,7 +1,7 @@
 import { router } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView,
+  ActivityIndicator, Alert, AppState, Pressable, RefreshControl, ScrollView,
   StyleSheet, Text, View,
 } from 'react-native';
 import { Page } from '../components/Page';
@@ -10,6 +10,7 @@ import { useCourses } from '../features/courses/CourseProvider';
 import type { CourseUnitSummary } from '../features/courses/schema';
 import { useOnboarding } from '../features/onboarding/OnboardingProvider';
 import { canStartLesson } from '../features/progress/logic';
+import { computeStreak, daysFromLegacy, localStudyDay } from '../features/progress/streak';
 import { useProgress } from '../features/progress/ProgressProvider';
 
 // V9: camada visual nativa. Os identificadores, provedores, rotas e operações
@@ -122,6 +123,15 @@ export default function Home() {
   const { settings } = useOnboarding();
   const { catalog, ready: coursesReady, refreshing, refresh, downloaded, download, remove, loadUnit } = useCourses();
   const [busy, setBusy] = useState(false);
+  const [today, setToday] = useState(() => localStudyDay(new Date()));
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', state => {
+      if (state === 'active') setToday(localStudyDay(new Date()));
+    });
+    return () => subscription.remove();
+  }, []);
+  const streak = useMemo(() => computeStreak(daysFromLegacy(progress.lastStudiedAt, progress.studyDays), today),
+    [progress.lastStudiedAt, progress.studyDays, today]);
 
   // Mantém a sequência e os mesmos IDs utilizados no XP e na sincronização.
   const italianUnits = useMemo(() => catalog.units.filter(unit => unit.language === 'it'), [catalog.units]);
@@ -207,6 +217,15 @@ export default function Home() {
                 <View style={styles.xpGem} />
                 <Text style={styles.xpNumber}>{progress.totalXp} XP</Text>
               </View>
+            </View>
+
+            <View style={styles.streakBanner} accessibilityLabel={`Sequência de ${streak.current} dias. ${streak.studiedToday ? 'Estudo de hoje concluído.' : 'Estude hoje para manter a sequência.'}`}>
+              <View style={styles.streakFlame}><Text style={styles.streakFlameIcon}>🔥</Text></View>
+              <View style={styles.streakCopy}>
+                <Text style={styles.streakTitle}>{streak.current} {streak.current === 1 ? 'dia seguido' : 'dias seguidos'}</Text>
+                <Text style={styles.streakSubtitle}>{streak.studiedToday ? 'Sua sequência está garantida hoje' : streak.current > 0 ? 'Uma lição hoje mantém sua sequência' : 'Conclua uma lição e comece sua sequência'}</Text>
+              </View>
+              <Text style={styles.streakToday}>{streak.studiedToday ? '✓ HOJE' : 'HOJE'}</Text>
             </View>
 
             <View style={styles.heroIntroduction}>
@@ -378,6 +397,14 @@ const styles = StyleSheet.create({
   xpChip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 13, paddingVertical: 11, borderRadius: 14, backgroundColor: '#223A4A', gap: 8 },
   xpGem: { width: 9, height: 9, transform: [{ rotate: '45deg' }], backgroundColor: GOLD, borderRadius: 2 },
   xpNumber: { fontSize: 12, fontWeight: '900', color: '#FFE0AF' },
+  streakBanner: { marginTop: 17, paddingVertical: 13, paddingHorizontal: 14, backgroundColor: '#102E4F',
+    borderWidth: 1, borderColor: '#30547A', borderRadius: 18, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  streakFlame: { width: 41, height: 41, borderRadius: 14, backgroundColor: '#173D63', alignItems: 'center', justifyContent: 'center' },
+  streakFlameIcon: { fontSize: 22 },
+  streakCopy: { flex: 1 },
+  streakTitle: { color: '#F5F8FF', fontSize: 15, fontWeight: '900' },
+  streakSubtitle: { color: '#A9C5E4', fontSize: 10, lineHeight: 15, marginTop: 3 },
+  streakToday: { color: '#FFCA88', fontSize: 9, fontWeight: '900', letterSpacing: 0.5 },
   heroIntroduction: { marginTop: 21, marginBottom: 18 },
   sectionOverline: { fontSize: 10, fontWeight: '900', color: GOLD, letterSpacing: 2.0 },
   introductionTitle: { color: '#F5F9FF', fontSize: 26, fontWeight: '900', letterSpacing: -0.8, lineHeight: 32, marginTop: 9 },

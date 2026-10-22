@@ -1,9 +1,12 @@
-/** v1.1: campos opcionais permitem ler todos os progressos salvos pela versao anterior. */
+import { addStudyDay, daysFromLegacy, isStudyDay } from './streak.ts';
+
+/** Novos campos sao opcionais para recuperar o progresso salvo em versoes antigas. */
 export type PendingXpAward = { lessonId: string; xp: number };
 export type StudentProgress = {
   completedLessonIds: string[];
   totalXp: number;
   lastStudiedAt: string | null;
+  studyDays?: string[];
   pendingXpAwards?: PendingXpAward[];
   legacyXpBaseline?: number;
   legacyXpImported?: boolean;
@@ -13,16 +16,26 @@ export function canStartLesson(lessonId: string, orderedIds: readonly string[], 
   const index = orderedIds.indexOf(lessonId);
   return index >= 0 && (index === 0 || progress.completedLessonIds.includes(orderedIds[index - 1]!));
 }
+/** A repeticao conta para streak, mas nunca concede XP novamente. */
 export function applyLessonCompletion(progress: StudentProgress, lessonId: string,
-  correctCount: number, totalQuestions: number, isoDate: string): { next: StudentProgress; earnedXp: number } {
+  correctCount: number, totalQuestions: number, isoDate: string, localDay?: string): { next: StudentProgress; earnedXp: number } {
   if (!lessonId || !Number.isInteger(correctCount) || !Number.isInteger(totalQuestions) ||
       totalQuestions < 1 || correctCount < 0 || correctCount > totalQuestions) {
     throw new Error('Resultado da lição inválido');
   }
-  if (progress.completedLessonIds.includes(lessonId)) return { next: progress, earnedXp: 0 };
+  const day = localDay ?? isoDate.slice(0, 10);
+  if (!isStudyDay(day)) throw new Error('Dia de estudo inválido');
+  const previousDays = daysFromLegacy(progress.lastStudiedAt, progress.studyDays);
+  const nextDays = addStudyDay(previousDays, day);
+  const dayAdded = nextDays.length !== previousDays.length;
+  const alreadyCompleted = progress.completedLessonIds.includes(lessonId);
+  if (alreadyCompleted) {
+    if (!dayAdded) return { next: progress, earnedXp: 0 };
+    return { next: { ...progress, studyDays: nextDays, lastStudiedAt: isoDate }, earnedXp: 0 };
+  }
   const earnedXp = correctCount * 10;
   return { next: {
-    ...progress,
+    ...progress, studyDays: nextDays,
     completedLessonIds: [...progress.completedLessonIds, lessonId],
     totalXp: progress.totalXp + earnedXp,
     lastStudiedAt: isoDate,
@@ -37,6 +50,7 @@ export function isStudentProgress(value: unknown): value is StudentProgress {
     typeof v.totalXp === 'number' && Number.isSafeInteger(v.totalXp) && v.totalXp >= 0 &&
     (v.lastStudiedAt === null || typeof v.lastStudiedAt === 'string');
   if (!valid) return false;
+  if (v.studyDays !== undefined && (!Array.isArray(v.studyDays) || v.studyDays.some(day => !isStudyDay(day)))) return false;
   if (v.legacyXpBaseline !== undefined && (!Number.isSafeInteger(v.legacyXpBaseline) || v.legacyXpBaseline < 0)) return false;
   if (v.legacyXpImported !== undefined && typeof v.legacyXpImported !== 'boolean') return false;
   if (v.pendingXpAwards !== undefined && (!Array.isArray(v.pendingXpAwards) ||

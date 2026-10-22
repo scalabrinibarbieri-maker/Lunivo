@@ -1,17 +1,21 @@
 import type { PendingXpAward, StudentProgress } from './logic';
-/** Contrato remoto XP (soma do historico migrado + premiacoes por licao). */
+import { isStudyDay, normalizeStudyDays } from './streak.ts';
+/** Contrato remoto: campo studyDays opcional ate o deploy do Worker com suporte a streak. */
 export type RemoteProgress = {
   completedLessonIds: string[];
   totalXp: number;
   legacyXpImported: boolean;
+  studyDays?: string[];
 };
 export function parseRemoteProgress(body: unknown): RemoteProgress {
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('RESPOSTA_INVALIDA');
   const b = body as Partial<RemoteProgress>;
   if (!Array.isArray(b.completedLessonIds) || b.completedLessonIds.some(id => typeof id !== 'string') ||
-      !Number.isSafeInteger(b.totalXp) || (b.totalXp ?? -1) < 0 || typeof b.legacyXpImported !== 'boolean')
+      !Number.isSafeInteger(b.totalXp) || (b.totalXp ?? -1) < 0 || typeof b.legacyXpImported !== 'boolean' ||
+      (b.studyDays !== undefined && (!Array.isArray(b.studyDays) || b.studyDays.some(day => !isStudyDay(day)))))
     throw new Error('RESPOSTA_INVALIDA');
-  return { completedLessonIds: b.completedLessonIds, totalXp: b.totalXp!, legacyXpImported: b.legacyXpImported };
+  return { completedLessonIds: b.completedLessonIds, totalXp: b.totalXp!, legacyXpImported: b.legacyXpImported,
+    ...(b.studyDays !== undefined ? { studyDays: normalizeStudyDays(b.studyDays) } : {}) };
 }
 /** Sincronizacao aditiva: preserva lições locais que ainda não aparecem no catalogo. */
 export function planProgressSync(local: readonly string[], remote: readonly string[], known: readonly string[]) {

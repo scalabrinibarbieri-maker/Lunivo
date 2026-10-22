@@ -5,8 +5,9 @@ import { useAuth } from '../auth/AuthProvider';
 import { firebaseAuth } from '../auth/firebase';
 import { useCourses } from '../courses/CourseProvider';
 import { applyLessonCompletion, EMPTY_PROGRESS, isStudentProgress, type StudentProgress, type PendingXpAward } from './logic';
+import { localStudyDay, daysFromLegacy, normalizeStudyDays } from './streak';
 import { progressKeyForUid } from './keys';
-import { fetchCloudProgress, uploadCloudProgress, uploadXpAwards, importOldXp } from './syncApi';
+import { fetchCloudProgress, uploadCloudProgress, uploadXpAwards, importOldXp, uploadStudyDays } from './syncApi';
 import { mergeCloudXp, planProgressSync, xpToImport } from './syncLogic';
 
 type SyncStatus = 'guest' | 'idle' | 'syncing' | 'synced' | 'error';
@@ -32,8 +33,7 @@ export function ProgressProvider({ children }: { children: React.ReactNode }) {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('guest');
   const ready = authReady && loadedKey === key;
 
-  // Uma fila de gravacao por aparelho evita sobrescrever o XP conquistado offline
-  // quando a nuvem responde no mesmo instante de uma conclusao de licao.
+  // Fila de escrita por aparelho: nao perde registros de estudo e XP em sincronizacoes concorrentes.
   const writeTailRef = useRef<Promise<void>>(Promise.resolve());
   const updateLocal = useCallback((targetKey: string, change: (current: StudentProgress) => StudentProgress) => {
     const op = writeTailRef.current.catch(() => {}).then(async () => {
@@ -57,13 +57,17 @@ export function ProgressProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!authReady) return;
     let active = true;
+    setLoadedKey(null); // nunca reutilizar estado de uma conta anterior enquanto carrega
     setSyncStatus(uid ? 'idle' : 'guest');
     (async () => {
       try {
         const value = await Storage.getItem(key);
         const parsed: unknown = value ? JSON.parse(value) : null;
         const restored = isStudentProgress(parsed) ? parsed : EMPTY_PROGRESS;
-        if (active) { progressRef.current = restored; setProgress(restored); }
+        // Importa apenas o ultimo dia verificavel da versao anterior, sem fabricar streak.
+        const days = daysFromLegacy(restored.lastStudiedAt, restored.studyDays);
+        const next = days.length && restored.studyDays === undefined ? { ...restored, studyDays: days } : restored;
+        if (active) { progressRef.current = next; setProgress(next); }
       } catch (err) {
         console.warn('Falha ao ler progresso local:', err);
         if (active) { progressRef.current = EMPTY_PROGRESS; setProgress(EMPTY_PROGRESS); }
@@ -86,14 +90,11 @@ export function ProgressProvider({ children }: { children: React.ReactNode }) {
         const plan = planProgressSync(progressRef.current.completedLessonIds, remote.completedLessonIds, lessonIds);
         const knownRemote = new Set(remote.completedLessonIds);
         const missing = plan.uploadIds.filter(id => !knownRemote.has(id));
-        // Compatibilidade com a API existente: o servidor aceita ate 25 IDs por requisicao.
         for (let i = 0; i < missing.length; i += 25) {
           remote = await uploadCloudProgress(user, missing.slice(i, i + 25));
           if (keyRef.current !== key || firebaseAuth.currentUser?.uid !== uid) return false;
         }
 
-        // Uma unica importacao dos pontos anteriores a esta versao; nunca importa o
-        // novo XP adquirido depois da atualizacao como se fosse XP historico.
         const oldXp = xpToImport(progressRef.current);
         if (oldXp > 0 && !remote.legacyXpImported) {
           remote = await importOldXp(user, oldXp);
@@ -111,13 +112,34 @@ export function ProgressProvider({ children }: { children: React.ReactNode }) {
           if (keyRef.current !== key || firebaseAuth.currentUser?.uid !== uid) return false;
         }
 
-        // Releitura evita consolidar uma resposta antiga enquanto outro celular
-        // adiciona pontos ou o usuário termina outra lição durante o upload.
+        // O Worker legado ainda nao oferece studyDays: preservar XP e aceitar streak local ate deploy.
+        if (remote.studyDays !== undefined) {
+          const localDays = daysFromLegacy(progressRef.current.lastStudiedAt, progressRef.current.studyDays);
+          const existingDays = new Set(remote.studyDays);
+          const upper = new Date(); upper.setUTCDate(upper.getUTCDate() + 1);
+          const lower = new Date(); lower.setUTCFullYear(lower.getUTCFullYear() - 5);
+          const remaining = localDays.filter(day => !existingDays.has(day) && day <= upper.toISOString().slice(0, 10) && day >= lower.toISOString().slice(0, 10));
+          // Falhas isoladas: backend desatualizado nao pode bloquear sincronizacao de XP.
+          try {
+            for (let i = 0; i < remaining.length; i += 60) {
+              remote = await uploadStudyDays(user, remaining.slice(i, i + 60));
+              if (keyRef.current !== key || firebaseAuth.currentUser?.uid !== uid) return false;
+            }
+          } catch (error) {
+            console.warn('Streak ainda nao sincronizada; registros locais mantidos:', error instanceof Error ? error.message : 'erro');
+          }
+        }
+
         remote = await fetchCloudProgress(user);
         if (keyRef.current !== key || firebaseAuth.currentUser?.uid !== uid) return false;
         await updateLocal(key, current => {
           const mergedLessons = planProgressSync(current.completedLessonIds, remote.completedLessonIds, lessonIds).mergedLocalIds;
-          return { ...mergeCloudXp(current, remote, submitted), completedLessonIds: mergedLessons };
+          const localDays = daysFromLegacy(current.lastStudiedAt, current.studyDays);
+          return {
+            ...mergeCloudXp(current, remote, submitted),
+            completedLessonIds: mergedLessons,
+            studyDays: normalizeStudyDays([...localDays, ...(remote.studyDays ?? [])]),
+          };
         });
         if (keyRef.current === key) setSyncStatus('synced');
         return true;
@@ -154,8 +176,9 @@ export function ProgressProvider({ children }: { children: React.ReactNode }) {
     if (!ready) throw new Error('Progresso ainda nao carregado');
     if (!lessonIds.includes(id)) throw new Error('Licao nao publicada');
     let earnedXp = 0;
+    const now = new Date();
     await updateLocal(key, current => {
-      const outcome = applyLessonCompletion(current, id, correct, total, new Date().toISOString());
+      const outcome = applyLessonCompletion(current, id, correct, total, now.toISOString(), localStudyDay(now));
       earnedXp = outcome.earnedXp;
       return outcome.next;
     });

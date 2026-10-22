@@ -28,3 +28,5 @@ export const uploadXpAwards = (user: User, awards: readonly PendingXpAward[]) =>
   requestProgress(user, 'POST', '/awards', { awards });
 export const importOldXp = (user: User, totalXp: number) =>
   requestProgress(user, 'POST', '/legacy-xp', { totalXp });
+export const uploadStudyDays = (user: User, days: readonly string[]) =>
+  requestProgress(user, 'POST', '/study-days', { studyDays: days });
