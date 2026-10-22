@@ -7,6 +7,7 @@ import {
 import { Page } from '../components/Page';
 import { PremiumEmblem } from '../components/PremiumEmblem';
 import { PremiumInsightSheet, type InsightKind } from '../components/PremiumInsightSheet';
+import { PremiumLoopAura } from '../components/PremiumLoopAura';
 import { LESSONS } from '../features/learning/data';
 import { useCourses } from '../features/courses/CourseProvider';
 import type { CourseUnitSummary } from '../features/courses/schema';
@@ -210,8 +211,7 @@ export default function Home() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { void refresh(); }}
             tintColor={SKY} colors={[BLUE]} progressBackgroundColor="#FFFFFF" />}>
           <View style={styles.darkSection}>
-            <View pointerEvents="none" style={styles.ambientTop} />
-            <View pointerEvents="none" style={styles.ambientSmall} />
+            <PremiumLoopAura variant="surface" opacity={0.95} />
             <View style={styles.brandRow}>
               <View style={styles.brandIdentity}>
                 <Image source={require('../../assets/lunivo-logo.png')} resizeMode="contain"
@@ -239,6 +239,7 @@ export default function Home() {
             <Pressable accessibilityRole="button" onPress={() => setInsight('streak')}
               style={({ pressed }) => [styles.streakBanner, pressed && styles.pressed]}
               accessibilityLabel={`Ver sequência de ${streak.current} dias. ${streak.studiedToday ? 'Estudo de hoje concluído.' : 'Estude hoje para manter a sequência.'}`}>
+              <PremiumLoopAura variant="streak" opacity={0.95} />
               <View style={styles.streakFlame}><PremiumEmblem kind="streak" size={39} /></View>
               <View style={styles.streakCopy}>
                 <Text style={styles.streakTitle}>{streak.current} {streak.current === 1 ? 'dia seguido' : 'dias seguidos'}</Text>
@@ -254,8 +255,7 @@ export default function Home() {
 
             <Animated.View style={[styles.heroCard, { opacity: entrance,
               transform: [{ translateY: entrance.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) }] }]}>
-              <View pointerEvents="none" style={styles.heroCircleBig} />
-              <View pointerEvents="none" style={styles.heroCircleSmall} />
+              <PremiumLoopAura variant="hero" opacity={1} />
               <View style={styles.heroCardTop}>
                 <View style={styles.heroStatus}>
                   <View style={styles.heroStatusDot} />
@@ -403,9 +403,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: PAPER },
   scroll: { flex: 1 },
   scrollContent: { paddingBottom: 14 },
-  darkSection: { backgroundColor: NAVY, paddingHorizontal: 22, paddingTop: 15, paddingBottom: 43, overflow: 'hidden' },
-  ambientTop: { position: 'absolute', top: -235, right: -174, width: 405, height: 405, borderRadius: 215, backgroundColor: '#0B3054', opacity: 0.8 },
-  ambientSmall: { position: 'absolute', top: 171, left: -220, width: 330, height: 330, borderRadius: 165, backgroundColor: '#0A345B', opacity: 0.35 },
+  darkSection: { backgroundColor: NAVY, paddingHorizontal: 22, paddingTop: 15, paddingBottom: 43, overflow: 'hidden', position: 'relative' },
   brandRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   // O PNG original possui margens transparentes internas. O deslocamento
   // compensa essas margens sem redesenhar ou alterar a marca.
@@ -421,7 +419,7 @@ const styles = StyleSheet.create({
   xpGem: { width: 9, height: 9, transform: [{ rotate: '45deg' }], backgroundColor: GOLD, borderRadius: 2 },
   xpNumber: { fontSize: 12, fontWeight: '900', color: '#FFE0AF' },
   streakBanner: { marginTop: 17, paddingVertical: 13, paddingHorizontal: 14, backgroundColor: '#102E4F',
-    borderWidth: 1, borderColor: '#30547A', borderRadius: 18, flexDirection: 'row', alignItems: 'center', gap: 10 },
+    borderWidth: 1, borderColor: '#30547A', borderRadius: 18, flexDirection: 'row', alignItems: 'center', gap: 10, overflow: 'hidden' },
   streakFlame: { width: 45, height: 45, borderRadius: 15, backgroundColor: '#1A4161', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#41617D' },
   streakFlameIcon: { fontSize: 22 },
   streakCopy: { flex: 1 },
@@ -432,9 +430,7 @@ const styles = StyleSheet.create({
   sectionOverline: { fontSize: 10, fontWeight: '900', color: GOLD, letterSpacing: 2.0 },
   introductionTitle: { color: '#F5F9FF', fontSize: 26, fontWeight: '900', letterSpacing: -0.8, lineHeight: 32, marginTop: 9 },
   introductionSubtitle: { fontSize: 13, color: '#A5BEDB', marginTop: 10, lineHeight: 20 },
-  heroCard: { backgroundColor: '#12365D', borderRadius: 26, padding: 19, borderWidth: 1, borderColor: '#26557C', overflow: 'hidden' },
-  heroCircleBig: { position: 'absolute', right: -85, top: -120, height: 255, width: 255, borderRadius: 128, backgroundColor: '#20598B', opacity: 0.39 },
-  heroCircleSmall: { position: 'absolute', right: -70, top: 57, height: 164, width: 164, borderRadius: 82, borderColor: '#72B7F0', borderWidth: 1, opacity: 0.2 },
+  heroCard: { backgroundColor: '#12365D', borderRadius: 26, padding: 19, borderWidth: 1, borderColor: '#26557C', overflow: 'hidden', position: 'relative', shadowColor: '#0C2B4C', shadowOpacity: 0.18, shadowRadius: 16, elevation: 4 },
   heroCardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   heroStatus: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   heroStatusDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#7DD9D6' },

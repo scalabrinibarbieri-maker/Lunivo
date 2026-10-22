@@ -1,18 +1,30 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef } from 'react';
+import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 import { Page } from '../components/Page';
 import { ActionButton } from '../components/ActionButton';
 import { PremiumEmblem } from '../components/PremiumEmblem';
+import { PremiumLoopAura } from '../components/PremiumLoopAura';
 import { colors, sizes } from '../constants/theme';
 import { useCourses } from '../features/courses/CourseProvider';
 import { useProgress } from '../features/progress/ProgressProvider';
 import { computeStreak, daysFromLegacy, localStudyDay } from '../features/progress/streak';
 
 export default function Result() {
-  const { lessonId, correct, xp } = useLocalSearchParams<{ lessonId: string; correct: string; xp: string }>();
+  const { lessonId, correct, xp, streakCelebration } = useLocalSearchParams<{ lessonId: string; correct: string; xp: string; streakCelebration?: string }>();
   const {lesson: findLesson} = useCourses();
   const {progress} = useProgress();
   const lesson = lessonId ? findLesson(lessonId) : undefined;
+  const celebration = streakCelebration === '1';
+  const burst = useRef(new Animated.Value(celebration ? 0 : 1)).current;
+  useEffect(() => {
+    if (!celebration) return;
+    const animation = Animated.sequence([
+      Animated.timing(burst, { toValue: 1, duration: 560, easing: Easing.out(Easing.back(1.3)), useNativeDriver: true }),
+      Animated.timing(burst, { toValue: 0.92, duration: 920, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+    ]);
+    animation.start();
+  }, [burst, celebration]);
   if (!lesson) return <Page><View style={styles.layout}><Text style={styles.title}>Resultado indisponível</Text><ActionButton title="Voltar" onPress={() => router.replace('/')} /></View></Page>;
   const gradedCount = lesson.exercises.filter(exercise => exercise.type !== 'info').length;
   const correctCount = Math.min(gradedCount, Math.max(0, Number(correct) || 0));
@@ -24,9 +36,13 @@ export default function Result() {
     <View style={styles.stats}><View style={styles.stat}><Text style={styles.number}>{correctCount}/{gradedCount}</Text><Text style={styles.legend}>Respostas certas</Text></View>
       <View style={styles.stat}><Text style={styles.number}>+{earned}</Text><Text style={styles.legend}>XP conquistados</Text></View></View>
     {earned === 0 && <Text style={styles.note}>Ao repetir uma lição, o XP não é contado novamente.</Text>}
-    <View style={styles.streakCard} accessibilityLiveRegion="polite">
-      <PremiumEmblem kind="streak" size={40} />
+    <View style={[styles.streakCard, celebration && styles.streakCardCelebration]} accessibilityLiveRegion="polite">
+      {celebration && <PremiumLoopAura variant="streak" opacity={1} />}
+      <Animated.View style={[styles.streakMedal, { transform: [{ scale: burst.interpolate({ inputRange: [0, 1], outputRange: [0.84, 1.1] }) }] }]}>
+        <PremiumEmblem kind="streak" size={44} />
+      </Animated.View>
       <View style={styles.streakCopy}>
+        {celebration && <Text style={styles.streakCelebrationKicker}>Sequência garantida hoje</Text>}
         <Text style={styles.streakTitle}>{streak.current} {streak.current === 1 ? 'dia seguido' : 'dias seguidos'}</Text>
         <Text style={styles.streakText}>{streak.studiedToday ? 'Estudo de hoje registrado. Volte amanhã para continuar!' : 'Continue praticando para manter sua sequência.'}</Text>
       </View>
@@ -45,8 +61,11 @@ const styles = StyleSheet.create({
   number: { fontSize: 23, fontWeight: '900', color: colors.primary },
   legend: { fontSize: 12, color: colors.muted, marginTop: 8, textAlign: 'center' },
   note: { fontSize: 12, color: colors.muted, textAlign: 'center', marginTop: 15 },
-  streakCard: { width: '100%', marginTop: 20, padding: 16, borderRadius: 19, backgroundColor: '#102E4F', borderWidth: 1, borderColor: '#2C537A', flexDirection: 'row', alignItems: 'center', gap: 12 },
+  streakCard: { width: '100%', marginTop: 20, padding: 16, borderRadius: 19, backgroundColor: '#102E4F', borderWidth: 1, borderColor: '#2C537A', flexDirection: 'row', alignItems: 'center', gap: 12, overflow: 'hidden' },
+  streakCardCelebration: { borderColor: '#F0B76D' },
+  streakMedal: { width: 52, height: 52, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.04)' },
   streakCopy: { flex: 1 },
+  streakCelebrationKicker: { color: '#F6C27E', fontSize: 10, fontWeight: '900', letterSpacing: 1.2, marginBottom: 4 },
   streakTitle: { color: '#FFFFFF', fontSize: 17, fontWeight: '900' },
   streakText: { color: '#C7DDF5', fontSize: 12, lineHeight: 18, marginTop: 4 },
   bottom: { width: '100%', marginTop: 30 },

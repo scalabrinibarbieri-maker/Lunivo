@@ -5,9 +5,11 @@ import {
   ScrollView, StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import { ActionButton } from '../../components/ActionButton';
+import { AnimatedInstructionCue } from '../../components/AnimatedInstructionCue';
 import { LetterBank } from '../../components/LetterBank';
 import { canUseLetterBank } from '../../features/learning/letterBank';
 import { MatchBoard } from '../../components/MatchBoard';
+import { PremiumLoopAura } from '../../components/PremiumLoopAura';
 import { Page } from '../../components/Page';
 import { ProgressBar } from '../../components/ProgressBar';
 import { colors, sizes } from '../../constants/theme';
@@ -19,6 +21,7 @@ import { correctAnswerLabel, evaluateExercise, gradeExercise } from '../../featu
 import { isChoiceExercise, isListeningExercise, isWriteExercise } from '../../features/learning/types';
 import { canStartLesson } from '../../features/progress/logic';
 import { useProgress } from '../../features/progress/ProgressProvider';
+import { computeStreak, daysFromLegacy, localStudyDay } from '../../features/progress/streak';
 
 const NAVY = '#071D34';
 const BLUE = '#246FEB';
@@ -87,6 +90,7 @@ export default function LessonScreen() {
 
   const question = lesson.exercises[index];
   if (!question) return null;
+  const studiedTodayBefore = computeStreak(daysFromLegacy(progress.lastStudiedAt, progress.studyDays), localStudyDay(new Date())).studiedToday;
   const listening = isListeningExercise(question);
   const choice = isChoiceExercise(question);
   const writing = isWriteExercise(question);
@@ -118,7 +122,7 @@ export default function LessonScreen() {
     setSubmitting(true);
     try {
       const xp = await completeLesson(lesson.id, count, lesson.exercises.length);
-      router.replace({ pathname: '/result', params: { lessonId: lesson.id, correct: String(count), xp: String(xp) } });
+      router.replace({ pathname: '/result', params: { lessonId: lesson.id, correct: String(count), xp: String(xp), streakCelebration: studiedTodayBefore ? '0' : '1' } });
     } catch {
       Alert.alert('Não foi possível salvar', 'Tente novamente para preservar seu progresso.');
       setSubmitting(false);
@@ -150,8 +154,9 @@ export default function LessonScreen() {
       showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}
       onContentSizeChange={() => { if (checked) scrollRef.current?.scrollToEnd({ animated: true }); }}>
       <View style={styles.promptCard}>
-        <View pointerEvents="none" style={styles.cornerRing} />
+        <PremiumLoopAura variant="lesson" opacity={1} />
         <Text style={styles.cardEyebrow}>{informative ? infoCategory : `QUESTÃO ${String(index + 1).padStart(2, '0')}  ·  ${question.instruction.toUpperCase()}`}</Text>
+        <AnimatedInstructionCue key={`${question.id}:${question.instruction}`} text={informative ? infoCategory : question.instruction} />
         <Text style={styles.prompt}>{question.prompt}</Text>
         <Text style={styles.cardHint}>{exerciseHint}</Text>
       </View>
@@ -283,10 +288,9 @@ const styles = StyleSheet.create({
   counter: { fontSize: 19, fontWeight: '900', color: NAVY },
   counterMuted: { fontSize: 13, fontWeight: '700', color: '#8B9CB1' },
   scroll: { flexGrow: 1, paddingHorizontal: sizes.page, paddingTop: 17, paddingBottom: 42 },
-  promptCard: { backgroundColor: NAVY, borderRadius: 24, paddingHorizontal: 23, paddingVertical: 26, overflow: 'hidden', minHeight: 164 },
-  cornerRing: { position: 'absolute', width: 190, height: 190, right: -113, top: -108, borderRadius: 95, borderWidth: 24, borderColor: 'rgba(81,163,255,0.08)' },
+  promptCard: { backgroundColor: NAVY, borderRadius: 24, paddingHorizontal: 23, paddingVertical: 26, overflow: 'hidden', minHeight: 164, position: 'relative', shadowColor: '#0C233E', shadowOpacity: 0.16, shadowRadius: 14, elevation: 4 },
   cardEyebrow: { color: '#F4BD79', fontSize: 10, fontWeight: '900', letterSpacing: 1.3, lineHeight: 16 },
-  prompt: { color: '#FFFFFF', fontWeight: '900', fontSize: 33, letterSpacing: -1.15, lineHeight: 41, marginTop: 15 },
+  prompt: { color: '#FFFFFF', fontWeight: '900', fontSize: 33, letterSpacing: -1.15, lineHeight: 41, marginTop: 17 },
   cardHint: { color: '#B9CDE3', fontSize: 13, lineHeight: 20, marginTop: 11 },
   sectionLabel: { color: '#647F9C', fontSize: 10, fontWeight: '900', letterSpacing: 1.5, marginBottom: 11 },
   choices: { marginTop: 28, gap: 11 },
