@@ -16,6 +16,7 @@ import { colors, sizes } from '../../constants/theme';
 import { ExercisePronunciation } from '../../features/audio/ExercisePronunciation';
 import { useFeedbackSounds } from '../../features/audio/useFeedbackSounds';
 import { useCourses } from '../../features/courses/CourseProvider';
+import { localInfoImageSource } from '../../features/courses/localInfoImage';
 import type { Lesson } from '../../features/learning/types';
 import { correctAnswerLabel, evaluateExercise, gradeExercise } from '../../features/learning/engine';
 import { isChoiceExercise, isListeningExercise, isWriteExercise } from '../../features/learning/types';
@@ -31,10 +32,12 @@ const RED = '#B74D4D';
 export default function LessonScreen() {
   const { lessonId } = useLocalSearchParams<{ lessonId: string }>();
   const { progress, ready, completeLesson } = useProgress();
-  const { lesson: findLesson, loadLesson, lessonIds, imageUri } = useCourses();
-  const [fallback, setFallback] = useState<Lesson | undefined>();
+  const { loadLesson, lessonIds, imageUri } = useCourses();
+  const [resolved, setResolved] = useState<Lesson | undefined>();
+  const loaderRef = useRef(loadLesson);
+  loaderRef.current = loadLesson;
   const [loadError, setLoadError] = useState(false);
-  const lesson = (lessonId ? findLesson(lessonId) : undefined) ?? fallback;
+  const lesson = resolved?.id === lessonId ? resolved : undefined;
   const [index, setIndex] = useState(0);
   const [answer, setAnswer] = useState('');
   const [checked, setChecked] = useState(false);
@@ -53,13 +56,16 @@ export default function LessonScreen() {
   const playFeedback = useFeedbackSounds();
 
   useEffect(() => {
-    if (!lessonId || findLesson(lessonId)) return;
+    if (!lessonId) return;
     let active = true;
+    setResolved(undefined);
     setLoadError(false);
-    void loadLesson(lessonId).then(l => { if (active) setFallback(l); })
+    // Resolve the lesson BEFORE showing its first exercise. This avoids inserting
+    // remote info mid-session and shifting index / XP / question count.
+    void loaderRef.current(lessonId).then(l => { if (active) setResolved(l); })
       .catch(() => { if (active) setLoadError(true); });
     return () => { active = false; };
-  }, [lessonId, findLesson, loadLesson]);
+  }, [lessonId]);
 
   // Sons somente depois de verificar; nunca ao escolher uma alternativa ou par.
   useEffect(() => {
@@ -174,7 +180,7 @@ export default function LessonScreen() {
 
       {question.type === 'info' && <View style={styles.infoSection}>
         {question.image && <View style={styles.infoImageCard}>
-          {!infoImageError ? <Image source={{ uri: imageUri(lesson.id, question.image.url) }} style={styles.infoImage} resizeMode="contain"
+          {!infoImageError ? <Image source={localInfoImageSource(question.image.url) ?? { uri: imageUri(lesson.id, question.image.url) }} style={styles.infoImage} resizeMode="contain"
             accessible accessibilityLabel={question.image.alt} onError={() => setInfoImageError(true)} />
             : <View style={styles.infoImageFallback}><Text style={styles.infoImageFallbackText}>Imagem não disponível. O conteúdo continua abaixo.</Text></View>}
           {question.image.caption && <Text style={styles.infoCaption}>{question.image.caption}</Text>}

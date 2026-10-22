@@ -46,8 +46,12 @@ test('XP e os identificadores dos exercícios permanecem no fluxo existente', ()
   assert.match(lesson, /gradeExercise\(question, answer\)/);
   assert.match(lesson, /if \(right\) setCount/);
   assert.match(lesson, /completeLesson\(lesson\.id, count, lesson\.exercises\.length\)/);
-  assert.match(lesson, /findLesson/);
-  assert.match(lesson, /loadLesson\(lessonId\)/);
+  // A V21 resolve a lição uma única vez antes do primeiro exercício.
+  // O carregador é mantido em uma ref para evitar remontagem e troca de índices.
+  assert.match(lesson, /\{ loadLesson, lessonIds, imageUri \} = useCourses\(\)/);
+  assert.match(lesson, /const loaderRef = useRef\(loadLesson\)/);
+  assert.match(lesson, /loaderRef\.current\(lessonId\)/);
+  assert.match(lesson, /setResolved\(l\)/);
   assert.match(lesson, /ExercisePronunciation/);
   assert.match(match, /encodeMatches\(next\)/);
 });

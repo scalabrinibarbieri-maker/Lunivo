@@ -13,7 +13,10 @@ test('injeta etapa informativa sobre ciao antes da primeira lição local', () =
   assert.match(source, /category: 'culture'/);
 });
 
-test('explicação usa imagem embutida para testar o modo info sem depender da internet', () => {
-  assert.match(source, /data:image\/png;base64,/);
+test('a ilustração do Ciao é um PNG nativo empacotado, sem base64', () => {
+  const helper = readFileSync(new URL('../src/features/courses/localInfoImage.ts', import.meta.url), 'utf8');
+  assert.match(source, /url: LOCAL_CIAO_IMAGE_URI/);
+  assert.doesNotMatch(source, /data:image\/png;base64,/);
   assert.match(source, /Ilustração de duas pessoas se cumprimentando/);
+  assert.match(helper, /require\('\.\.\/\.\.\/\.\.\/assets\/lessons\/ciao-greeting\.png'\)/);
 });

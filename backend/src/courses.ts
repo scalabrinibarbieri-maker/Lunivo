@@ -2,7 +2,11 @@
 const CATALOG_KEY = 'courses/v1/catalog.json';
 const MAX_CATALOG = 64 * 1024;
 const MAX_UNIT = 512 * 1024;
+const MAX_BUNDLED_INFO = 48 * 1024;
+const MAX_BUNDLED_IMAGE = 1500 * 1024;
 const UNIT = /^\/v1\/courses\/unit\/([a-z]{2}-(?:a1|a2|b1|b2|c1|c2)-u[0-9]{2,4})\/([1-9][0-9]{0,4})$/;
+const BUNDLED_INFO = /^\/v1\/courses\/bundled\/(it-a1-0[123])\/infos$/;
+const BUNDLED_ASSET = /^\/v1\/courses\/bundled\/assets\/([a-z0-9][a-z0-9-]{0,70}\.png)$/;
 const respond = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: {
   'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*',
   'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'public, max-age=300',
@@ -37,6 +41,28 @@ export async function handleCourseRequest(request: Request, bucket?: R2Bucket): 
   if (!['GET','HEAD'].includes(request.method)) return respond({error:'METODO_INVALIDO'},405);
   if (!bucket) return respond({error:'CURSOS_NAO_CONFIGURADOS'},503);
   try {
+    const overlay = BUNDLED_INFO.exec(url.pathname);
+    if (overlay) {
+      const file = await bucket.get(`courses/v1/bundled/${overlay[1]}/infos.json`);
+      if (!file) return new Response(null,{status:404,headers:{'Cache-Control':'no-store'}});
+      if (!file.size || file.size > MAX_BUNDLED_INFO) return respond({error:'INFO_INVALIDA'},502);
+      return new Response(request.method==='HEAD'?null:file.body,{status:200,headers:{
+        'Content-Type':'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin':'*','X-Content-Type-Options':'nosniff',
+        'Content-Length':String(file.size),'Cache-Control':'no-store',
+      }});
+    }
+    const image = BUNDLED_ASSET.exec(url.pathname);
+    if (image) {
+      const file = await bucket.get(`courses/v1/bundled/assets/${image[1]}`);
+      if (!file) return new Response(null,{status:404});
+      if (!file.size || file.size > MAX_BUNDLED_IMAGE) return respond({error:'IMAGEM_INVALIDA'},502);
+      return new Response(request.method==='HEAD'?null:file.body,{status:200,headers:{
+        'Content-Type':'image/png','Access-Control-Allow-Origin':'*',
+        'X-Content-Type-Options':'nosniff','Content-Length':String(file.size),
+        'Cache-Control':'public, max-age=31536000, immutable',
+      }});
+    }
     const manifest = await readCatalog(bucket);
     if (url.pathname === '/v1/courses/catalog') return request.method === 'HEAD' ? new Response(null,{status:200}) : respond(manifest);
     const matched = UNIT.exec(url.pathname);
