@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator, Alert, AppState, Pressable, RefreshControl, ScrollView,
   StyleSheet, Text, View, Image,
@@ -109,9 +109,18 @@ function DockIcon({ kind, active }: { kind: 'learn' | 'courses' | 'profile'; act
 function DockItem({ title, kind, selected, onPress }: {
   title: string; kind: 'learn' | 'courses' | 'profile'; selected: boolean; onPress: () => void;
 }) {
+  // Impede que toques rápidos disparem várias transições sobrepostas.
+  const navigating = useRef(false);
+  const open = () => {
+    if (selected || navigating.current) return;
+    navigating.current = true;
+    // Permite navegar novamente ao retornar à Home, mas ignora taps em rajada.
+    setTimeout(() => { navigating.current = false; }, 600);
+    onPress();
+  };
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={title} accessibilityState={{ selected }}
-      onPress={onPress} style={({ pressed }) => [styles.dockItem, selected && styles.dockItemSelected, pressed && styles.pressed]}>
+    <Pressable accessibilityRole="tab" accessibilityLabel={title} accessibilityState={{ selected, disabled: selected }}
+      disabled={selected} onPress={open} style={({ pressed }) => [styles.dockItem, selected && styles.dockItemSelected, pressed && styles.pressed]}>
       <DockIcon kind={kind} active={selected} />
       <Text style={[styles.dockLabel, selected && styles.dockLabelSelected]}>{title}</Text>
     </Pressable>

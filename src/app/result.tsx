@@ -13,13 +13,14 @@ export default function Result() {
   const {progress} = useProgress();
   const lesson = lessonId ? findLesson(lessonId) : undefined;
   if (!lesson) return <Page><View style={styles.layout}><Text style={styles.title}>Resultado indisponível</Text><ActionButton title="Voltar" onPress={() => router.replace('/')} /></View></Page>;
-  const correctCount = Math.min(lesson.exercises.length, Math.max(0, Number(correct) || 0));
+  const gradedCount = lesson.exercises.filter(exercise => exercise.type !== 'info').length;
+  const correctCount = Math.min(gradedCount, Math.max(0, Number(correct) || 0));
   const earned = Math.max(0, Number(xp) || 0);
   const streak = computeStreak(daysFromLegacy(progress.lastStudiedAt, progress.studyDays), localStudyDay(new Date()));
   return <Page><View style={styles.layout}>
     <View style={styles.medal}><Text style={{fontSize:64}}>✦</Text></View><Text style={styles.kicker}>LIÇÃO CONCLUÍDA</Text>
     <Text style={styles.title}>Bravissimo!</Text><Text style={styles.subtitle}>Você terminou “{lesson.title}”. Continue avançando!</Text>
-    <View style={styles.stats}><View style={styles.stat}><Text style={styles.number}>{correctCount}/{lesson.exercises.length}</Text><Text style={styles.legend}>Respostas certas</Text></View>
+    <View style={styles.stats}><View style={styles.stat}><Text style={styles.number}>{correctCount}/{gradedCount}</Text><Text style={styles.legend}>Respostas certas</Text></View>
       <View style={styles.stat}><Text style={styles.number}>+{earned}</Text><Text style={styles.legend}>XP conquistados</Text></View></View>
     {earned === 0 && <Text style={styles.note}>Ao repetir uma lição, o XP não é contado novamente.</Text>}
     <View style={styles.streakCard} accessibilityLiveRegion="polite">

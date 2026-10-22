@@ -1,6 +1,6 @@
 import type { Exercise, Lesson } from '../learning/types';
 
-/** Contrato publico v1. Dados remotos sao SEMPRE validados antes de serem usados. */
+/** Contrato público v1: as lições locais e remotas continuam com os mesmos IDs. */
 export type CourseLessonSummary = { id: string; title: string; subtitle: string; exerciseCount: number };
 export type CourseUnitSummary = {
   id: string; language: string; level: string; order: number; title: string; subtitle: string;
@@ -18,6 +18,20 @@ const OBJ = (value: unknown): value is Record<string, unknown> => Boolean(value)
 const INTEGER = (value: unknown, min: number, max: number) => Number.isSafeInteger(value) && Number(value) >= min && Number(value) <= max;
 function fail(): never { throw new Error('CONTEUDO_REMOTO_INVALIDO'); }
 
+/** Somente HTTPS público para imagens remotas (evita file:, data:, javascript: e hosts locais). */
+export function validLessonImageUrl(input: unknown): input is string {
+  if (typeof input !== 'string' || input.length > 700 || !input.startsWith('https://')) return false;
+  try {
+    const url = new URL(input);
+    if (url.protocol !== 'https:' || url.username || url.password || url.hash || url.port) return false;
+    const hostname = url.hostname.toLowerCase();
+    if (!hostname.includes('.') || hostname === 'localhost' || hostname.endsWith('.localhost') ||
+        hostname.endsWith('.local') || hostname.endsWith('.internal') || /^(?:\d{1,3}\.){3}\d{1,3}$/.test(hostname) ||
+        hostname === '[::1]' || hostname === '[::]') return false;
+    return true;
+  } catch { return false; }
+}
+
 export function parseCourseCatalog(input: unknown): CourseCatalog {
   if (!OBJ(input) || input.version !== 1 || !Array.isArray(input.units) || input.units.length > 100) fail();
   const units: CourseUnitSummary[] = [];
@@ -27,9 +41,8 @@ export function parseCourseCatalog(input: unknown): CourseCatalog {
     if (!OBJ(raw) || typeof raw.id !== 'string' || !UNIT_ID.test(raw.id) ||
         !STR(raw.language, 24) || !STR(raw.level, 2) || !STR(raw.title, 90) || !STR(raw.subtitle, 180) ||
         !INTEGER(raw.order, 2, 9999) || !INTEGER(raw.revision, 1, 99999) ||
-        !Array.isArray(raw.lessons) || raw.lessons.length < 1 || raw.lessons.length > 20 ||
-        unitIds.has(raw.id)) fail();
-    if (raw.id.slice(0,2) !== raw.language || raw.id.split('-')[1]?.toUpperCase() !== raw.level) fail();
+        !Array.isArray(raw.lessons) || raw.lessons.length < 1 || raw.lessons.length > 20 || unitIds.has(raw.id)) fail();
+    if (raw.id.slice(0, 2) !== raw.language || raw.id.split('-')[1]?.toUpperCase() !== raw.level) fail();
     unitIds.add(raw.id);
     const lessons: CourseLessonSummary[] = [];
     for (const entry of raw.lessons) {
@@ -43,13 +56,22 @@ export function parseCourseCatalog(input: unknown): CourseCatalog {
       title: String(raw.title), subtitle: String(raw.subtitle), order: Number(raw.order),
       revision: Number(raw.revision), lessons });
   }
-  units.sort((a,b) => a.language.localeCompare(b.language) || a.level.localeCompare(b.level) || a.order - b.order);
+  units.sort((a, b) => a.language.localeCompare(b.language) || a.level.localeCompare(b.level) || a.order - b.order);
   return { version: 1, units };
 }
 
 function validateExercise(value: unknown): value is Exercise {
   if (!OBJ(value) || !STR(value.id, 16) || typeof value.id !== 'string' || !EXERCISE_ID.test(value.id) ||
-      !STR(value.prompt, 500) || !STR(value.instruction, 150) || !STR(value.explanation, 700)) return false;
+      !STR(value.prompt, 500) || !STR(value.instruction, 150) ||
+      !STR(value.explanation, value.type === 'info' ? 1800 : 700)) return false;
+  if (value.type === 'info') {
+    if (value.category !== undefined && !['vocabulary', 'culture', 'grammar', 'tip'].includes(String(value.category))) return false;
+    if (value.image !== undefined) {
+      if (!OBJ(value.image) || !validLessonImageUrl(value.image.url) || !STR(value.image.alt, 180) ||
+          (value.image.caption !== undefined && !STR(value.image.caption, 240))) return false;
+    }
+    return Object.keys(value).every(key => ['type', 'id', 'prompt', 'instruction', 'explanation', 'category', 'image'].includes(key));
+  }
   if (value.type === 'choice' || value.type === 'listen_choice') {
     if (!Array.isArray(value.options) || value.options.length < 2 || value.options.length > 6 || !STR(value.correctOptionId, 20)) return false;
     const ids = new Set<string>();
@@ -88,15 +110,16 @@ export function parseCourseUnit(input: unknown, summary: CourseUnitSummary): Cou
     const expected = summary.lessons[i];
     if (!OBJ(entry) || !expected || entry.id !== expected.id || entry.title !== expected.title || entry.subtitle !== expected.subtitle ||
         entry.unit !== summary.order || !Array.isArray(entry.exercises) || entry.exercises.length !== expected.exerciseCount) fail();
+    if (entry.exercises.every((ex: unknown) => OBJ(ex) && ex.type === 'info')) fail();
     for (const ex of entry.exercises) {
       if (!validateExercise(ex) || exerciseIds.has(ex.id)) fail();
       exerciseIds.add(ex.id);
     }
     lessons.push(entry as unknown as Lesson);
   }
-  return { version: 1, unitId: summary.id, revision: summary.revision, lessons };
+  return { version: 1, unitId: summary.id, revision: summary.revision, lessons } as CourseUnit;
 }
-export function unitObjectKey(unit: Pick<CourseUnitSummary, 'id'|'revision'>): string {
+export function unitObjectKey(unit: Pick<CourseUnitSummary, 'id' | 'revision'>): string {
   if (!UNIT_ID.test(unit.id) || !INTEGER(unit.revision, 1, 99999)) fail();
   return `courses/v1/units/${unit.id}-r${unit.revision}.json`;
 }

@@ -76,6 +76,7 @@ function preferredSpelling(exercise: WriteExercise | ListenWriteExercise, match:
 
 /** Avaliação detalhada sem mudar o contrato booleano antigo de gradeExercise(). */
 export function evaluateExercise(exercise: Exercise, answer: string): GradingResult {
+  if (exercise.type === 'info') return INCORRECT; // Tela instrutiva não é uma resposta.
   if (exercise.type === 'match') return gradeMatchingExercise(exercise, answer) ? EXACT : INCORRECT;
   if (exercise.type === 'choice' || exercise.type === 'listen_choice')
     return answer === exercise.correctOptionId ? EXACT : INCORRECT;
@@ -123,6 +124,7 @@ export function gradeExercise(exercise: Exercise, answer: string): boolean {
 }
 
 export function correctAnswerLabel(exercise: Exercise): string {
+  if (exercise.type === 'info') return '';
   if (exercise.type === 'match') return exercise.pairs.map(p => `${p.left} — ${p.right}`).join(' · ');
   if (exercise.type === 'write' || exercise.type === 'listen_write') return exercise.sampleAnswer;
   return exercise.options.find(o => o.id === exercise.correctOptionId)?.label ?? '';

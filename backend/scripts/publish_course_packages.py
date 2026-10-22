@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Publica pacotes curso-lunivo-*.zip no Cloudflare R2 de forma conservadora.
+"""Publicador conservador de pacotes curso-lunivo-*.zip em Cloudflare R2.
 
-Escreve objetos de unidades versionados antes de substituir o catálogo. O bucket R2
-é privado; as credenciais só existem em GitHub Actions. Nenhuma compilação de APK.
+Inclui etapas informativas (info) com imagens HTTPS opcionais. Nao altera
+catalogo ou unidades publicadas sem revisao e verificacao previas.
 """
 from __future__ import annotations
 import argparse
+import ipaddress
 import json
 import os
 import re
@@ -13,6 +14,7 @@ import sys
 import zipfile
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 BUCKET = 'lunivo-audios'
 CATALOG_KEY = 'courses/v1/catalog.json'
@@ -48,6 +50,20 @@ def string(v: Any, n: int) -> bool:
 
 def integer(v: Any, low: int, high: int) -> bool:
     return type(v) is int and low <= v <= high
+
+def public_https_image(value: Any) -> bool:
+    if not isinstance(value, str) or not 1 <= len(value) <= 700 or not value.startswith('https://'):return False
+    try:
+        parsed = urlsplit(value)
+        host = (parsed.hostname or '').lower()
+        if parsed.scheme != 'https' or parsed.username or parsed.password or parsed.fragment or parsed.port is not None:return False
+        if not host or '.' not in host or host.endswith(('.local', '.internal', '.localhost')):return False
+        try:
+            ipaddress.ip_address(host)
+            return False
+        except ValueError: pass
+        return True
+    except ValueError:return False
 
 def summary_unit(raw: Any) -> dict:
     if not isinstance(raw, dict): fail('Resumo da unidade inválido.')
@@ -85,10 +101,17 @@ def validate_exercise(ex: Any, used: set[str]) -> None:
     eid=ex.get('id')
     if not isinstance(eid,str) or not EX_ID.fullmatch(eid) or eid in BUILTIN_EXERCISE_IDS or eid in used:fail('ID de exercício repetido, reservado ou inválido.')
     used.add(eid)
-    if not all(string(ex.get(field),limit) for field,limit in [('prompt',500),('instruction',150),('explanation',700)]):fail('Texto do exercício inválido.')
-    base={'type','id','prompt','instruction','explanation'}
     typ=ex.get('type')
-    if typ in ('choice','listen_choice'):
+    if not all(string(ex.get(field),limit) for field,limit in [('prompt',500),('instruction',150),('explanation',1800 if typ=='info' else 700)]):fail('Texto do exercício inválido.')
+    base={'type','id','prompt','instruction','explanation'}
+    if typ == 'info':
+        if set(ex) - (base | {'category','image'}):fail('Campos extras na explicação.')
+        if ex.get('category','tip') not in ('vocabulary','culture','grammar','tip'):fail('Categoria de explicação inválida.')
+        if 'image' in ex:
+            photo=ex['image']
+            if not isinstance(photo,dict) or not {'url','alt'} <= set(photo) <= {'url','alt','caption'} or not public_https_image(photo['url']) or not string(photo['alt'],180) or ('caption' in photo and not string(photo['caption'],240)):
+                fail('Imagem explicativa inválida.')
+    elif typ in ('choice','listen_choice'):
         extra={'options','correctOptionId'}|({'audioExerciseId'} if typ=='listen_choice' else set())
         if set(ex)!=base|extra or not isinstance(ex['options'],list) or not 2<=len(ex['options'])<=6:fail('Escolha inválida.')
         ids=set()
@@ -116,6 +139,7 @@ def validate_unit(doc: Any, summary: dict, exercise_ids: set[str]) -> None:
         if not isinstance(l,dict) or set(l)!={'id','title','subtitle','unit','exercises'}:fail('Campos da lição inválidos.')
         if l['id']!=ref['id'] or l['title']!=ref['title'] or l['subtitle']!=ref['subtitle'] or l['unit']!=summary['order']:fail('Lição diverge do resumo.')
         if not isinstance(l['exercises'],list) or len(l['exercises'])!=ref['exerciseCount']:fail('Contagem de exercícios incorreta.')
+        if all(e.get('type') == 'info' for e in l['exercises'] if isinstance(e,dict)):fail('A lição precisa de ao menos um exercício avaliativo.')
         for ex in l['exercises']:validate_exercise(ex,exercise_ids)
 
 def file_key(unit: dict) -> str:
@@ -133,8 +157,7 @@ def read_package(path: Path) -> list[tuple[dict,bytes]]:
             if sum(f.file_size for f in info)>MAX_ZIP_BYTES:fail('ZIP descompactado muito grande.')
             summaries=parse_catalog(read_json(z.read(PART_FILE),MAX_CATALOG_BYTES),partial=True)
             if not summaries or set(names)!={PART_FILE}|{file_key(u) for u in summaries}:fail('ZIP deve conter somente o catálogo e as unidades declaradas.')
-            ex_ids=set()
-            result=[]
+            ex_ids=set(); result=[]
             for summary in summaries:
                 body=z.read(file_key(summary))
                 validate_unit(read_json(body,MAX_UNIT_BYTES),summary,ex_ids)

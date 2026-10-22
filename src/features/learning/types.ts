@@ -7,21 +7,24 @@ export type ChoiceExercise = BaseExercise & {
 export type WriteExercise = BaseExercise & {
   type: 'write'; acceptedAnswers: readonly string[]; sampleAnswer: string;
 };
-/** Escute uma fala e selecione a interpretação correta. Não exibir o texto falado. */
 export type ListenChoiceExercise = BaseExercise & {
   type: 'listen_choice'; audioExerciseId: string;
   options: readonly ChoiceOption[]; correctOptionId: string;
 };
-/** Ditado: ouça a fala e escreva em italiano, sem exibir a transcrição antes de corrigir. */
 export type ListenWriteExercise = BaseExercise & {
   type: 'listen_write'; audioExerciseId: string;
   acceptedAnswers: readonly string[]; sampleAnswer: string;
 };
-/** Associação: escolha uma expressão em italiano, depois a tradução correspondente. */
 export type MatchExercise = BaseExercise & {
   type: 'match'; pairs: readonly { id: string; left: string; right: string }[];
 };
-export type Exercise = ChoiceExercise | WriteExercise | ListenChoiceExercise | ListenWriteExercise | MatchExercise;
+/** Tela instrutiva: não exige resposta e não gera XP adicional. */
+export type InfoExercise = BaseExercise & {
+  type: 'info';
+  category?: 'vocabulary' | 'culture' | 'grammar' | 'tip';
+  image?: { url: string; alt: string; caption?: string };
+};
+export type Exercise = ChoiceExercise | WriteExercise | ListenChoiceExercise | ListenWriteExercise | MatchExercise | InfoExercise;
 export type Lesson = { id: string; title: string; subtitle: string; unit: number; exercises: readonly Exercise[] };
 export function isListeningExercise(exercise: Exercise): exercise is ListenChoiceExercise | ListenWriteExercise {
   return exercise.type === 'listen_choice' || exercise.type === 'listen_write';

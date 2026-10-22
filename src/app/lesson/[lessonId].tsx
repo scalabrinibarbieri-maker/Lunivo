@@ -1,10 +1,12 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Keyboard, KeyboardAvoidingView, Platform, Pressable,
+  ActivityIndicator, Alert, Image, Keyboard, KeyboardAvoidingView, Platform, Pressable,
   ScrollView, StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import { ActionButton } from '../../components/ActionButton';
+import { LetterBank } from '../../components/LetterBank';
+import { canUseLetterBank } from '../../features/learning/letterBank';
 import { MatchBoard } from '../../components/MatchBoard';
 import { Page } from '../../components/Page';
 import { ProgressBar } from '../../components/ProgressBar';
@@ -39,6 +41,8 @@ export default function LessonScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [audioReady, setAudioReady] = useState(false);
   const [skipped, setSkipped] = useState(false);
+  const [inputMode, setInputMode] = useState<'keyboard' | 'letters'>('keyboard');
+  const [infoImageError, setInfoImageError] = useState(false);
   const scrollRef = useRef<ScrollView | null>(null);
   const playedFeedback = useRef<string | null>(null);
   const playFeedback = useFeedbackSounds();
@@ -86,6 +90,8 @@ export default function LessonScreen() {
   const listening = isListeningExercise(question);
   const choice = isChoiceExercise(question);
   const writing = isWriteExercise(question);
+  const informative = question.type === 'info';
+  const bankAvailable = writing && canUseLetterBank(question.sampleAnswer);
   // É possível desfazer e refazer pares; a avaliação só acontece após todos serem ligados.
   const matchReady = question.type !== 'match' || answer.split('|').filter(Boolean).length === question.pairs.length;
   const canVerify = answer.trim().length > 0 && matchReady && (!listening || audioReady);
@@ -105,7 +111,7 @@ export default function LessonScreen() {
     if (index < lesson.exercises.length - 1) {
       setIndex(v => v + 1);
       setAnswer(''); setChecked(false); setCorrect(false); setSpellingCorrection(null);
-      setAudioReady(false); setSkipped(false);
+      setAudioReady(false); setSkipped(false); setInputMode('keyboard'); setInfoImageError(false);
       scrollRef.current?.scrollTo({ y: 0, animated: false });
       return;
     }
@@ -120,8 +126,9 @@ export default function LessonScreen() {
   };
 
   const audioExerciseId = listening ? question.audioExerciseId : question.id;
-  const exerciseHint = question.type === 'match' ? 'Relacione as expressões nas duas colunas.'
+  const exerciseHint = informative ? 'Leia com atenção antes de continuar.' : question.type === 'match' ? 'Relacione as expressões nas duas colunas.'
     : choice ? 'Escolha a alternativa que faz sentido.' : 'Escreva sua resposta no campo abaixo.';
+  const infoCategory = informative ? ({ vocabulary: 'NOVA PALAVRA', culture: 'CULTURA E CONTEXTO', grammar: 'ENTENDA A GRAMÁTICA', tip: 'DICA DE APRENDIZADO' } as const)[question.category ?? 'tip'] : '';
   const feedbackTitle = skipped ? 'Atividade pulada' : correct ? (spellingCorrection ? 'Correto! Ajuste a escrita.' : 'Resposta correta!') : 'Vamos aprender com essa resposta';
 
   return <Page><KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.layout}>
@@ -144,13 +151,25 @@ export default function LessonScreen() {
       onContentSizeChange={() => { if (checked) scrollRef.current?.scrollToEnd({ animated: true }); }}>
       <View style={styles.promptCard}>
         <View pointerEvents="none" style={styles.cornerRing} />
-        <Text style={styles.cardEyebrow}>QUESTÃO {String(index + 1).padStart(2, '0')}  ·  {question.instruction.toUpperCase()}</Text>
+        <Text style={styles.cardEyebrow}>{informative ? infoCategory : `QUESTÃO ${String(index + 1).padStart(2, '0')}  ·  ${question.instruction.toUpperCase()}`}</Text>
         <Text style={styles.prompt}>{question.prompt}</Text>
         <Text style={styles.cardHint}>{exerciseHint}</Text>
       </View>
 
-      <ExercisePronunciation key={question.id} exerciseId={audioExerciseId}
-        concealText={listening && !checked} onReadyChange={listening ? setAudioReady : undefined} />
+      {question.type === 'info' && <View style={styles.infoSection}>
+        {question.image && <View style={styles.infoImageCard}>
+          {!infoImageError ? <Image source={{ uri: question.image.url }} style={styles.infoImage} resizeMode="contain"
+            accessible accessibilityLabel={question.image.alt} onError={() => setInfoImageError(true)} />
+            : <View style={styles.infoImageFallback}><Text style={styles.infoImageFallbackText}>Imagem não disponível. O conteúdo continua abaixo.</Text></View>}
+          {question.image.caption && <Text style={styles.infoCaption}>{question.image.caption}</Text>}
+        </View>}
+        <View style={styles.infoBody}><Text style={styles.infoBodyTitle}>Para entender melhor</Text>
+          <Text style={styles.infoBodyText}>{question.explanation}</Text></View>
+        <Text style={styles.infoContinueNote}>Nenhuma resposta necessária nesta etapa.</Text>
+      </View>}
+
+      {!informative && <ExercisePronunciation key={question.id} exerciseId={audioExerciseId}
+        concealText={listening && !checked} onReadyChange={listening ? setAudioReady : undefined} />}
 
       {choice && <View style={styles.choices}>
         <Text style={styles.sectionLabel}>SUA RESPOSTA</Text>
@@ -174,12 +193,32 @@ export default function LessonScreen() {
       </View>}
 
       {writing && <View style={styles.writeSection}>
-        <Text style={styles.sectionLabel}>SUA RESPOSTA</Text>
-        <TextInput key={question.id} accessibilityLabel="Sua resposta"
-          placeholder={listening ? 'Escreva o que ouviu...' : 'Escreva aqui...'}
-          placeholderTextColor="#94A3B7" value={answer} onChangeText={setAnswer}
-          editable={!checked} autoCapitalize="sentences" autoCorrect={false}
-          returnKeyType="done" style={[styles.input, checked && (correct ? styles.inputCorrect : styles.inputWrong)]} />
+        <View style={styles.writeHeader}>
+          <Text style={styles.sectionLabel}>SUA RESPOSTA</Text>
+          {bankAvailable && !checked && <View style={styles.modeSwitcher}>
+            <Pressable accessibilityRole="button" accessibilityLabel="Responder digitando no teclado"
+              accessibilityState={{ selected: inputMode === 'keyboard' }}
+              onPress={() => { if (inputMode !== 'keyboard') { Keyboard.dismiss(); setAnswer(''); setInputMode('keyboard'); } }}
+              style={[styles.modeChoice, inputMode === 'keyboard' && styles.modeActive]}>
+              <Text style={[styles.modeText, inputMode === 'keyboard' && styles.modeActiveText]}>⌨  Teclado</Text>
+            </Pressable>
+            <Pressable accessibilityRole="button" accessibilityLabel="Responder tocando em letras embaralhadas"
+              accessibilityState={{ selected: inputMode === 'letters' }}
+              onPress={() => { if (inputMode !== 'letters') { Keyboard.dismiss(); setAnswer(''); setInputMode('letters'); } }}
+              style={[styles.modeChoice, inputMode === 'letters' && styles.modeActive]}>
+              <Text style={[styles.modeText, inputMode === 'letters' && styles.modeActiveText]}>▦  Letras</Text>
+            </Pressable>
+          </View>}
+        </View>
+        {inputMode === 'letters' && bankAvailable ?
+          <LetterBank key={`${question.id}-letters`} sample={question.sampleAnswer} exerciseId={question.id}
+            checked={checked} onAnswer={setAnswer} /> :
+          <TextInput key={`${question.id}-keyboard`} accessibilityLabel="Sua resposta"
+            placeholder={listening ? 'Escreva o que ouviu...' : 'Escreva aqui...'}
+            placeholderTextColor="#94A3B7" value={answer} onChangeText={setAnswer}
+            editable={!checked} autoCapitalize="sentences" autoCorrect={false}
+            returnKeyType="done" style={[styles.input, checked && (correct ? styles.inputCorrect : styles.inputWrong)]} />}
+        {checked && inputMode === 'letters' && <Text style={styles.bankSummary}>Resposta montada: {answer}</Text>}
       </View>}
 
       {question.type === 'match' && <MatchBoard key={question.id} exercise={question} checked={checked} onAnswer={setAnswer} />}
@@ -188,7 +227,7 @@ export default function LessonScreen() {
         Aguarde a gravação carregar para responder. Para conteúdo da nuvem, conecte-se à internet na primeira vez.
       </Text>}
 
-      {checked && <View accessibilityLiveRegion="polite" style={[styles.feedback,
+      {checked && !informative && <View accessibilityLiveRegion="polite" style={[styles.feedback,
         skipped ? styles.skippedPanel : correct ? styles.good : styles.bad]}>
         <View style={styles.feedbackTop}>
           <View style={[styles.feedbackIcon, skipped ? styles.skipIcon : correct ? styles.goodIcon : styles.badIcon]}>
@@ -218,11 +257,11 @@ export default function LessonScreen() {
         accessibilityLabel="Pular atividade sem áudio, sem ganhar pontos"
         onPress={() => { Keyboard.dismiss(); setSkipped(true); setCorrect(false); setChecked(true); }}
         style={styles.skip}><Text style={styles.skipText}>Pular atividade sem áudio</Text></Pressable>}
-      <Pressable accessibilityRole="button" accessibilityState={{ disabled: submitting || (!checked && !canVerify) }}
-        disabled={submitting || (!checked && !canVerify)} onPress={checked ? () => { void next(); } : verify}
+      <Pressable accessibilityRole="button" accessibilityState={{ disabled: submitting || (!informative && !checked && !canVerify) }}
+        disabled={submitting || (!informative && !checked && !canVerify)} onPress={informative || checked ? () => { void next(); } : verify}
         style={({ pressed }) => [styles.primaryAction, checked && (correct ? styles.successAction : styles.continueAction),
-          (submitting || (!checked && !canVerify)) && styles.disabledAction, pressed && styles.pressed]}>
-        <Text style={styles.actionText}>{!checked ? 'Verificar resposta' : submitting ? 'Salvando...' : index === lesson.exercises.length - 1 ? 'Concluir lição' : 'Continuar'}</Text>
+          (submitting || (!informative && !checked && !canVerify)) && styles.disabledAction, pressed && styles.pressed]}>
+        <Text style={styles.actionText}>{submitting ? 'Salvando...' : informative ? (index === lesson.exercises.length - 1 ? 'Concluir lição' : 'Entendi, continuar') : !checked ? 'Verificar resposta' : index === lesson.exercises.length - 1 ? 'Concluir lição' : 'Continuar'}</Text>
         <Text style={styles.actionArrow}>→</Text>
       </Pressable>
     </View>
@@ -297,4 +336,21 @@ const styles = StyleSheet.create({
   pressed: { opacity: 0.79 },
   skip: { alignItems: 'center', paddingVertical: 11, marginBottom: 5 },
   skipText: { color: '#6B7F98', fontSize: 13, fontWeight: '700' },
+  writeHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 11, gap: 6 },
+  modeSwitcher: { flexDirection: 'row', padding: 3, backgroundColor: '#E4ECF7', borderRadius: 12, gap: 3 },
+  modeChoice: { paddingVertical: 9, paddingHorizontal: 10, borderRadius: 10 },
+  modeActive: { backgroundColor: '#FFFFFF', shadowColor: '#164777', shadowOpacity: 0.09, shadowRadius: 4, elevation: 2 },
+  modeText: { color: '#6B829E', fontSize: 11, fontWeight: '800' },
+  modeActiveText: { color: '#1A65BD' },
+  bankSummary: { marginTop: 10, fontSize: 12, color: '#627F9D' },
+  infoSection: { marginTop: 25, gap: 18 },
+  infoImageCard: { padding: 12, borderWidth: 1, borderColor: '#E2EAF3', borderRadius: 20, backgroundColor: '#FFFFFF' },
+  infoImage: { width: '100%', height: 220, borderRadius: 14, backgroundColor: '#F0F5FB' },
+  infoImageFallback: { height: 110, backgroundColor: '#EFF4FA', justifyContent: 'center', alignItems: 'center', borderRadius: 12, padding: 18 },
+  infoImageFallbackText: { color: '#7487A0', textAlign: 'center', fontSize: 13 },
+  infoCaption: { marginTop: 10, color: '#768CA4', fontSize: 12, lineHeight: 18 },
+  infoBody: { borderRadius: 20, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E1EAF4', padding: 21 },
+  infoBodyTitle: { color: '#1C61B0', fontWeight: '900', letterSpacing: 0.2, fontSize: 16, marginBottom: 11 },
+  infoBodyText: { color: '#263C55', fontSize: 16, lineHeight: 26 },
+  infoContinueNote: { color: '#8197AF', fontSize: 12, textAlign: 'center' },
 });

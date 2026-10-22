@@ -38,17 +38,17 @@ function AppNavigation() {
     <View style={{ flex: 1, backgroundColor: onboardingReady && !completed ? '#071625' : colors.background }} onLayout={() => setLaidOut(true)}>
       <StatusBar style={onboardingReady && !completed ? 'light' : 'dark'} />
       {!onboardingReady ? <ActivityIndicator style={{ flex: 1 }} color="#9CC5FF" /> : (
-        <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
+        <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right', contentStyle: { backgroundColor: colors.background } }}>
           <Stack.Protected guard={!completed}>
             <Stack.Screen name="onboarding" options={{ animation: 'fade' }} />
           </Stack.Protected>
           <Stack.Protected guard={completed}>
-            <Stack.Screen name="index" />
-            <Stack.Screen name="courses" />
-            <Stack.Screen name="profile" />
+            <Stack.Screen name="index" options={{ animation: 'none' }} />
+            <Stack.Screen name="courses" options={{ animation: 'fade', animationDuration: 180 }} />
+            <Stack.Screen name="profile" options={{ animation: 'fade', animationDuration: 180 }} />
             <Stack.Screen name="auth" />
             <Stack.Screen name="lesson/[lessonId]" />
-            <Stack.Screen name="result" />
+            <Stack.Screen name="result" options={{ animation: 'fade', animationDuration: 200 }} />
           </Stack.Protected>
         </Stack>
       )}
