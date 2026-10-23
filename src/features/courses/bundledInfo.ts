@@ -5,7 +5,7 @@ export type OnlineLessonInfo = {
   version: 1;
   revision: number;
   lessonId: string;
-  entries: { beforeExerciseId: string; exercise: InfoExercise }[];
+  entries: { beforeExerciseId?: string; afterExerciseId?: string; exercise: InfoExercise }[];
 };
 
 const BUNDLED_IDS = new Set(['it-a1-01', 'it-a1-02', 'it-a1-03']);
@@ -38,10 +38,12 @@ export function parseBundledInfo(input: unknown, lessonId: string): OnlineLesson
   }
   const seen = new Set<string>();
   for (const entry of input.entries) {
-    if (!OBJECT(entry) || Object.keys(entry).some(key => !['beforeExerciseId', 'exercise'].includes(key)) ||
-        !TEXT(entry.beforeExerciseId, 16) || !ID.test(entry.beforeExerciseId) || !OBJECT(entry.exercise)) {
+    if (!OBJECT(entry) || Object.keys(entry).some(key => !['beforeExerciseId', 'afterExerciseId', 'exercise'].includes(key)) ||
+        ('beforeExerciseId' in entry) === ('afterExerciseId' in entry) || !OBJECT(entry.exercise)) {
       throw new Error('BUNDLED_INFO_INVALID');
     }
+    const anchor = entry.beforeExerciseId ?? entry.afterExerciseId;
+    if (!TEXT(anchor, 16) || !ID.test(anchor)) throw new Error('BUNDLED_INFO_INVALID');
     const ex = entry.exercise;
     if (ex.type !== 'info' || !TEXT(ex.id, 16) || !ID.test(ex.id) || seen.has(ex.id) ||
         !TEXT(ex.prompt, 500) || !TEXT(ex.instruction, 150) || !TEXT(ex.explanation, 1800) ||
@@ -60,12 +62,17 @@ export function attachBundledInfo(base: Lesson, online: OnlineLessonInfo): Lesso
   if (base.id !== online.lessonId) return base;
   const allIds = new Set(base.exercises.map(ex => ex.id));
   const anchors = new Set(base.exercises.filter(ex => ex.type !== 'info').map(ex => ex.id));
-  if (online.entries.some(entry => !anchors.has(entry.beforeExerciseId) || allIds.has(entry.exercise.id))) return base;
-  const additions = new Map<string, InfoExercise[]>();
+  if (online.entries.some(entry => !anchors.has(entry.beforeExerciseId ?? entry.afterExerciseId ?? '') || allIds.has(entry.exercise.id))) return base;
+  const before = new Map<string, InfoExercise[]>();
+  const after = new Map<string, InfoExercise[]>();
   for (const entry of online.entries) {
-    const entries = additions.get(entry.beforeExerciseId) ?? [];
-    entries.push(entry.exercise);
-    additions.set(entry.beforeExerciseId, entries);
+    const anchor = entry.beforeExerciseId ?? entry.afterExerciseId!;
+    const additions = entry.beforeExerciseId ? before : after;
+    const items = additions.get(anchor) ?? [];
+    items.push(entry.exercise);
+    additions.set(anchor, items);
   }
-  return { ...base, exercises: base.exercises.flatMap(ex => [...(additions.get(ex.id) ?? []), ex]) };
+  return { ...base, exercises: base.exercises.flatMap(ex => [
+    ...(before.get(ex.id) ?? []), ex, ...(after.get(ex.id) ?? []),
+  ]) };
 }

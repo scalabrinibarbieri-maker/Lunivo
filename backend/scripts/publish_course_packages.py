@@ -191,8 +191,9 @@ def read_info_package(path:Path)->tuple[str,dict,bytes,dict[str,bytes]]:
             if not isinstance(raw,dict) or set(raw)!={'version','revision','lessonId','entries'} or raw['version']!=1 or not integer(raw['revision'],1,99999) or raw['lessonId'] not in BUILTIN_ORDER or not isinstance(raw['entries'],list) or len(raw['entries'])>12:fail('Infos inválidas.')
             seen=set();assets={}; referenced=set()
             for item in raw['entries']:
-                if not isinstance(item,dict) or set(item)!={'beforeExerciseId','exercise'}:fail('Posição inválida.')
-                if not isinstance(item['beforeExerciseId'],str) or not EX_ID.fullmatch(item['beforeExerciseId']) or item['beforeExerciseId'] not in BUILTIN_EXERCISE_IDS:fail('Exercício âncora inválido.')
+                if not isinstance(item,dict) or set(item) not in ({'beforeExerciseId','exercise'},{'afterExerciseId','exercise'}):fail('Posição inválida.')
+                anchor=item.get('beforeExerciseId',item.get('afterExerciseId'))
+                if not isinstance(anchor,str) or not EX_ID.fullmatch(anchor) or anchor not in BUILTIN_EXERCISE_IDS:fail('Exercício âncora inválido.')
                 ex=item['exercise'];validate_exercise(ex,seen)
                 if ex['type']!='info':fail('Bloco online deve ser explicativo.')
                 if 'image' in ex:
