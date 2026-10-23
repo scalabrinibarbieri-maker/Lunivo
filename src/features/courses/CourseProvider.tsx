@@ -59,6 +59,25 @@ function withLessonInfo(lesson: Lesson): Lesson {
     ],
   };
 }
+/** Optional online-only cards; a failed fetch never prevents the base lesson from opening. */
+async function withRemoteInfos(base:Lesson):Promise<Lesson>{
+  const controller=new AbortController();
+  const timeout=setTimeout(()=>controller.abort(),3500);
+  try{
+    const response=await fetch(`${BASE_URL}/v1/courses/bundled/${encodeURIComponent(base.id)}/infos`,{
+      signal:controller.signal,headers:{'Cache-Control':'no-store','Pragma':'no-cache'},
+    });
+    if(!response.ok)return base;
+    const raw=await response.text();
+    if(raw.length>48*1024)return base;
+    return attachBundledInfo(base,parseBundledInfo(JSON.parse(raw),base.id));
+  }catch{
+    // Offline or unavailable server: preserve the original bundled lesson.
+    // Applies to bundled and R2 lessons; no remote cards are cached.
+    return base;
+  }finally{clearTimeout(timeout);}
+}
+
 export function CourseProvider({children}:{children:React.ReactNode}){
   const [catalog,setCatalog]=useState<CourseCatalog>(EMPTY_CATALOG);
   const [ready,setReady]=useState(false);
@@ -162,29 +181,14 @@ export function CourseProvider({children}:{children:React.ReactNode}){
     const included=LESSONS.find(x=>x.id===id);
     if(included){
       const base=withLessonInfo(included);
-      // Network-only supplement. Never cache it locally: offline means NO remote infos.
-      const controller=new AbortController();
-      const timeout=setTimeout(()=>controller.abort(),3500);
-      try{
-        const response=await fetch(`${BASE_URL}/v1/courses/bundled/${encodeURIComponent(id)}/infos`,{
-          signal:controller.signal,
-          headers:{'Cache-Control':'no-store','Pragma':'no-cache'},
-        });
-        if(!response.ok)return base;
-        const raw=await response.text();
-        if(raw.length>48*1024)return base;
-        return attachBundledInfo(base,parseBundledInfo(JSON.parse(raw),id));
-      }catch{
-        // Offline or unavailable server: preserve the original bundled lesson.
-        return base;
-      }finally{clearTimeout(timeout);}
+      return withRemoteInfos(base);
     }
     const unit=catalog.units.find(u=>u.lessons.some(l=>l.id===id));
     if(!unit)throw new Error('LICAO_NAO_PUBLICADA');
     const data=await loadUnit(unit);
     const match=data.lessons.find(l=>l.id===id);
     if(!match)throw new Error('LICAO_NAO_PUBLICADA');
-    return match;
+    return withRemoteInfos(match);
   },[catalog,loadUnit]);
   const imageUri=useCallback((lessonId:string,url:string):string=>{
     const unit=catalog.units.find(u=>u.lessons.some(l=>l.id===lessonId));

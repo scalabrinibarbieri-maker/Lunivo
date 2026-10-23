@@ -172,6 +172,7 @@ INFO_KEY='courses/v1/bundled/{lesson_id}/infos.json'
 INFO_ASSET_PREFIX='courses/v1/bundled/assets/'
 INFO_IMAGE_ORIGIN='https://lunivo-api-dev.scalabrinibarbieri.workers.dev/v1/courses/bundled/assets/'
 BUILTIN_ORDER={'it-a1-01','it-a1-02','it-a1-03'}
+FIRST_INFO_ANCHOR='__first__'
 MAX_INFO_BYTES=48*1024
 MAX_INFO_IMAGE_BYTES=1500*1024
 INFO_ASSET_NAME=re.compile(r'^[a-z0-9][a-z0-9-]{0,70}\.png$')
@@ -188,12 +189,14 @@ def read_info_package(path:Path)->tuple[str,dict,bytes,dict[str,bytes]]:
             if sum(f.file_size for f in z.infolist()) > MAX_ZIP_BYTES:fail('ZIP de infos expandido muito grande.')
             if any('\\' in n or n.startswith('/') or any(x in ('','.','..') for x in n.split('/')) for n in names):fail('Caminho inseguro.')
             raw=read_json(z.read(INFO_FILE),MAX_INFO_BYTES)
-            if not isinstance(raw,dict) or set(raw)!={'version','revision','lessonId','entries'} or raw['version']!=1 or not integer(raw['revision'],1,99999) or raw['lessonId'] not in BUILTIN_ORDER or not isinstance(raw['entries'],list) or len(raw['entries'])>12:fail('Infos inválidas.')
+            if not isinstance(raw,dict) or set(raw)!={'version','revision','lessonId','entries'} or raw['version']!=1 or not integer(raw['revision'],1,99999) or (raw['lessonId'] not in BUILTIN_ORDER and not LESSON_ID.fullmatch(str(raw['lessonId']))) or not isinstance(raw['entries'],list) or len(raw['entries'])>12:fail('Infos inválidas.')
             seen=set();assets={}; referenced=set()
             for item in raw['entries']:
                 if not isinstance(item,dict) or set(item) not in ({'beforeExerciseId','exercise'},{'afterExerciseId','exercise'}):fail('Posição inválida.')
                 anchor=item.get('beforeExerciseId',item.get('afterExerciseId'))
-                if not isinstance(anchor,str) or not EX_ID.fullmatch(anchor) or anchor not in BUILTIN_EXERCISE_IDS:fail('Exercício âncora inválido.')
+                if not isinstance(anchor,str) or not ((anchor == FIRST_INFO_ANCHOR and 'beforeExerciseId' in item) or
+                    (EX_ID.fullmatch(anchor) and (raw['lessonId'] not in BUILTIN_ORDER or anchor in BUILTIN_EXERCISE_IDS))):
+                    fail('Exercício âncora inválido.')
                 ex=item['exercise'];validate_exercise(ex,seen)
                 if ex['type']!='info':fail('Bloco online deve ser explicativo.')
                 if 'image' in ex:
@@ -212,11 +215,28 @@ def read_info_package(path:Path)->tuple[str,dict,bytes,dict[str,bytes]]:
             return raw['lessonId'],raw,serialized(raw,MAX_INFO_BYTES),assets
     except zipfile.BadZipFile as exc:raise PublicationError('ZIP corrompido.') from exc
 
-def publish_infos(client:Any, infos:list[tuple[str,dict,bytes,dict[str,bytes]]])->None:
+def publish_infos(client:Any, infos:list[tuple[str,dict,bytes,dict[str,bytes]]], units:list[dict])->None:
     used=set()
     for lid,body,raw,assets in infos:
         if lid in used:fail('Duas publicações na mesma lição: envie um pacote por vez.')
         used.add(lid)
+        # Remote lesson inserts must reference an existing, published unit and
+        # an actual exercise, never a guessed course/lesson ID.
+        if lid not in BUILTIN_ORDER:
+            source=next((u for u in units if any(l['id']==lid for l in u['lessons'])),None)
+            if source is None:fail('Lição remota não encontrada no catálogo: '+lid)
+            content=get_object(client,file_key(source))
+            if content is None:fail('Unidade da lição remota não foi publicada: '+lid)
+            doc=read_json(content,MAX_UNIT_BYTES)
+            if not isinstance(doc,dict) or not isinstance(doc.get('lessons'),list):fail('Unidade remota inválida.')
+            lesson=next((l for l in doc['lessons'] if isinstance(l,dict) and l.get('id')==lid),None)
+            if lesson is None or not isinstance(lesson.get('exercises'),list):fail('Lição remota inválida.')
+            base_ids={e['id'] for e in lesson['exercises'] if isinstance(e,dict) and e.get('type')!='info' and isinstance(e.get('id'),str)}
+            existing_ids={e['id'] for e in lesson['exercises'] if isinstance(e,dict) and isinstance(e.get('id'),str)}
+            for entry in body['entries']:
+                anchor=entry.get('beforeExerciseId',entry.get('afterExerciseId'))
+                if anchor!=FIRST_INFO_ANCHOR and anchor not in base_ids:fail('Exercício âncora não existe na lição remota.')
+                if entry['exercise']['id'] in existing_ids:fail('ID de info já existe na lição remota.')
         key=INFO_KEY.format(lesson_id=lid)
         old=get_object(client,key)
         if old is not None:
@@ -286,7 +306,7 @@ def publish(client:Any,paths:list[Path])->tuple[int,int]:
         else:print('[Lunivo] Unidade idêntica já existente:',summary['id'])
     if units and raw!=manifest:
         client.put_object(Bucket=BUCKET,Key=CATALOG_KEY,Body=manifest,ContentType='application/json; charset=utf-8',CacheControl='public, max-age=300')
-    if info_packs: publish_infos(client,info_packs)
+    if info_packs: publish_infos(client,info_packs,future)
     print(f'[Lunivo] Catálogo de cursos publicado: {len(future)} unidades, {new_count} objetos novos. Infos: {len(info_packs)}')
     return len(future),new_count
 

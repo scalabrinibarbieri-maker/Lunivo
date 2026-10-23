@@ -5,7 +5,7 @@ const MAX_UNIT = 512 * 1024;
 const MAX_BUNDLED_INFO = 48 * 1024;
 const MAX_BUNDLED_IMAGE = 1500 * 1024;
 const UNIT = /^\/v1\/courses\/unit\/([a-z]{2}-(?:a1|a2|b1|b2|c1|c2)-u[0-9]{2,4})\/([1-9][0-9]{0,4})$/;
-const BUNDLED_INFO = /^\/v1\/courses\/bundled\/(it-a1-0[123])\/infos$/;
+const BUNDLED_INFO = /^\/v1\/courses\/bundled\/([a-z]{2}-(?:a1|a2|b1|b2|c1|c2)-[0-9]{2,4})\/infos$/;
 const BUNDLED_ASSET = /^\/v1\/courses\/bundled\/assets\/([a-z0-9][a-z0-9-]{0,70}\.png)$/;
 const respond = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: {
   'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*',
