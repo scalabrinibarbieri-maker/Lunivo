@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 import { strengthOf, vocabularyStats, type VocabularyMemory, type VocabularyWord, type WordMemory, type WordStrength } from '../features/vocabulary/logic';
+import { generalReviewWords, shouldOfferReview } from '../features/vocabulary/generalReview';
+import { LESSONS } from '../features/learning/data';
+import type { Lesson } from '../features/learning/types';
+import { useCourses } from '../features/courses/CourseProvider';
+import type { StudentProgress } from '../features/progress/logic';
 
 type Filter = 'all' | WordStrength;
 const NAVY = '#0C253E';
@@ -10,12 +15,18 @@ const STRENGTH = {
   weak: { title: 'Fracas', singular: 'Fraca', tint: '#AF626D', pale: '#FCEEF1' },
 };
 
-export function VocabularyPanel({ memory, onReview }: {
+export function VocabularyPanel({ memory, progress, onReview }: {
   memory: VocabularyMemory;
+  progress: StudentProgress;
   onReview: (words: readonly VocabularyWord[], correct: boolean) => Promise<void>;
 }) {
   const [filter, setFilter] = useState<Filter>('all');
+  const { lesson: cachedLesson, loadLesson } = useCourses();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [generalMode, setGeneralMode] = useState(false);
+  const [sessionWords, setSessionWords] = useState<VocabularyWord[]>([]);
+  const [sessionIndex, setSessionIndex] = useState(0);
+  const [loadingGeneral, setLoadingGeneral] = useState(false);
   const [revealed, setRevealed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
@@ -26,16 +37,18 @@ export function VocabularyPanel({ memory, onReview }: {
     const order: Record<WordStrength, number> = { weak: 0, medium: 1, strong: 2 };
     return order[strengthOf(a)] - order[strengthOf(b)] || a.term.localeCompare(b.term);
   }), [memory]);
-  const selected = selectedId ? memory[selectedId] : undefined;
+  const selected = generalMode ? sessionWords[sessionIndex] : selectedId ? memory[selectedId] : undefined;
+  const reviewDue = shouldOfferReview(progress, today);
+  const hasCompletedLessons = progress.completedLessonIds.length > 0;
   const visible = records.filter(word => filter === 'all' || strengthOf(word, today) === filter);
 
   useEffect(() => {
     slide.setValue(0);
-    if (!selectedId) return;
+    if (!selectedId && !generalMode) return;
     const anim = Animated.timing(slide, { toValue: 1, duration: 270, easing: Easing.out(Easing.cubic), useNativeDriver: true });
     anim.start();
     return () => anim.stop();
-  }, [selectedId, slide]);
+  }, [selectedId, generalMode, sessionIndex, slide]);
 
   const review = async (correct: boolean) => {
     if (!selected || busy) return;
@@ -45,10 +58,65 @@ export function VocabularyPanel({ memory, onReview }: {
       await onReview([word], correct);
       setSelectedId(null);
       setRevealed(false);
-      setNotice(correct ? 'Boa! A lembrança foi reforçada.' : 'Registrado. Esta palavra merece mais revisão.');
+      if (generalMode) {
+        if (sessionIndex + 1 < sessionWords.length) setSessionIndex(i => i + 1);
+        else {
+          setGeneralMode(false);
+          setSessionWords([]);
+          setSessionIndex(0);
+          setNotice('Revisão concluída! Continue praticando para fortalecer suas palavras.');
+        }
+      } else {
+        setNotice(correct ? 'Boa! A lembrança foi reforçada.' : 'Registrado. Esta palavra merece mais revisão.');
+      }
     } catch {
       setNotice('Não foi possível salvar esta revisão. Tente novamente.');
     } finally { setBusy(false); }
+  };
+
+  const beginGeneralReview = async () => {
+    if (loadingGeneral || busy) return;
+    setLoadingGeneral(true);
+    setNotice('');
+    try {
+      const completed = progress.completedLessonIds;
+      const localLessons = LESSONS.filter(l => completed.includes(l.id));
+      const builtinIds = new Set(LESSONS.map(l => l.id));
+      // Unidades remotas só são usadas se disponíveis, online ou já baixadas.
+      // O estudo inicial funciona integralmente sem conexão.
+      const remoteIds = completed.filter(id => !builtinIds.has(id)).slice(0, 45);
+      const remote = await Promise.all(remoteIds.map(id => {
+        const saved = cachedLesson(id);
+        return saved ? Promise.resolve(saved) : loadLesson(id).catch(() => null);
+      }));
+      const lessons = [...localLessons, ...remote.filter((l): l is Lesson => l !== null)];
+      const words = generalReviewWords(completed, lessons, memory, new Date(), 60);
+      // Ainda é possível revisar palavras registradas durante uma lição não concluída.
+      const available = words.length ? words : Object.values(memory).slice(0, 60).map(w => ({
+        id: w.id, term: w.term, meaning: w.meaning, language: w.language,
+      }));
+      if (!available.length) {
+        setNotice('Conclua uma lição para começar sua primeira revisão.');
+        return;
+      }
+      setSessionWords(available);
+      setSessionIndex(0);
+      setGeneralMode(true);
+      setSelectedId(null);
+      setRevealed(false);
+    } catch {
+      setNotice('Não foi possível preparar a revisão. Tente novamente.');
+    } finally {
+      setLoadingGeneral(false);
+    }
+  };
+
+  const leaveReview = () => {
+    setGeneralMode(false);
+    setSessionWords([]);
+    setSessionIndex(0);
+    setSelectedId(null);
+    setRevealed(false);
   };
 
   return <View style={styles.wrapper}>
@@ -78,11 +146,28 @@ export function VocabularyPanel({ memory, onReview }: {
         <View key={level} style={{ flex: stats[level], backgroundColor: STRENGTH[level].tint }} /> : null)}
     </View>}
 
+    {!selected && (hasCompletedLessons || stats.total > 0) && <View style={[styles.generalBanner, reviewDue && styles.generalBannerDue]}>
+      <View style={styles.generalHeader}>
+        <View style={styles.generalDot} />
+        <Text style={styles.generalLabel}>{reviewDue ? 'HORA DE REVISAR' : 'REVISÃO GERAL'}</Text>
+      </View>
+      <Text style={styles.generalTitle}>{reviewDue ? 'Vamos relembrar o que você aprendeu?' : 'Mantenha suas palavras na memória'}</Text>
+      <Text style={styles.generalDescription}>{reviewDue
+        ? 'Depois de alguns dias sem praticar, uma revisão ajuda a recuperar o ritmo.'
+        : 'Revise as expressões das lições que você já concluiu, mesmo sem histórico de palavras.'}</Text>
+      <Pressable accessibilityRole="button" disabled={loadingGeneral}
+        onPress={() => { void beginGeneralReview(); }}
+        style={[styles.generalButton, loadingGeneral && { opacity: 0.55 }]}>
+        <Text style={styles.generalButtonText}>{loadingGeneral ? 'Preparando revisão…' : 'Começar revisão geral'}</Text>
+        <Text style={styles.generalArrow}>›</Text>
+      </Pressable>
+    </View>}
+
     {selected ? <Animated.View style={[styles.reviewCard, {
       opacity: slide,
       transform: [{ translateY: slide.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) }],
     }]}>
-      <Text style={styles.reviewEyebrow}>REVISÃO ATIVA</Text>
+      <Text style={styles.reviewEyebrow}>{generalMode ? `REVISÃO GERAL · ${sessionIndex + 1} DE ${sessionWords.length}` : 'REVISÃO ATIVA'}</Text>
       <Text style={styles.reviewTitle}>Como se diz em italiano?</Text>
       <Text style={styles.meaning}>{selected.meaning}</Text>
       {!revealed ? <Pressable accessibilityRole="button" onPress={() => setRevealed(true)} style={styles.revealButton}>
@@ -102,7 +187,7 @@ export function VocabularyPanel({ memory, onReview }: {
           </Pressable>
         </View>
       </>}
-      <Pressable accessibilityRole="button" onPress={() => { setSelectedId(null); setRevealed(false); }} style={styles.cancel}>
+      <Pressable accessibilityRole="button" onPress={leaveReview} style={styles.cancel}>
         <Text style={styles.cancelText}>Voltar à lista</Text>
       </Pressable>
     </Animated.View> : <>
@@ -114,7 +199,7 @@ export function VocabularyPanel({ memory, onReview }: {
       </View>
       {!stats.total ? <View style={styles.empty}>
         <Text style={styles.emptyTitle}>Seu vocabulário começa aqui.</Text>
-        <Text style={styles.emptyText}>Conclua exercícios ou reveja uma lição para registrar suas primeiras palavras. As lições já concluídas antes desta atualização não têm histórico individual recuperável.</Text>
+        <Text style={styles.emptyText}>{hasCompletedLessons ? 'Que tal revisar suas lições? As palavras que você praticar aparecerão aqui.' : 'Aprenda novas expressões nas lições e acompanhe como sua memória evolui.'}</Text>
       </View> : visible.length === 0 ? <Text style={styles.emptyText}>Nenhuma palavra nesta categoria por enquanto.</Text> :
         visible.slice(0, 40).map((word: WordMemory) => {
           const level = strengthOf(word, today); const s = STRENGTH[level];
@@ -129,7 +214,7 @@ export function VocabularyPanel({ memory, onReview }: {
       {visible.length > 40 && <Text style={styles.more}>Mostrando 40 de {visible.length} termos. Use os filtros para encontrar mais.</Text>}
     </>}
     {!!notice && <Text accessibilityLiveRegion="polite" style={styles.notice}>{notice}</Text>}
-    <Text style={styles.footnote}>Estimativa de retenção, não um teste de memória. O histórico de vocabulário é salvo neste aparelho por conta; a sincronização na nuvem será adicionada separadamente.</Text>
+    <Text style={styles.footnote}>Um pouco de prática a cada dia ajuda a transformar novas palavras em conhecimento duradouro.</Text>
   </View>;
 }
 
@@ -165,6 +250,16 @@ const styles = StyleSheet.create({
   emptyTitle: { color: NAVY, fontWeight: '900', fontSize: 15 },
   emptyText: { marginTop: 8, fontSize: 12, lineHeight: 19, color: '#7488A0' },
   more: { color: '#627F9E', fontSize: 12, marginTop: 12, lineHeight: 19 },
+  generalBanner: { marginTop: 18, backgroundColor: '#102E4F', borderRadius: 19, padding: 17, borderWidth: 1, borderColor: '#376087', overflow: 'hidden' },
+  generalBannerDue: { borderColor: '#B9AC7C' },
+  generalHeader: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  generalDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#F3C47B' },
+  generalLabel: { color: '#A6C8E9', fontWeight: '900', fontSize: 10, letterSpacing: 1.4 },
+  generalTitle: { color: '#FFFFFF', fontWeight: '900', fontSize: 20, lineHeight: 26, marginTop: 9 },
+  generalDescription: { color: '#C7D6E7', fontSize: 13, lineHeight: 20, marginTop: 7 },
+  generalButton: { backgroundColor: '#F4F8FE', borderRadius: 13, paddingHorizontal: 15, paddingVertical: 13, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 15 },
+  generalButtonText: { color: '#194B78', fontSize: 13, fontWeight: '900' },
+  generalArrow: { color: '#194B78', fontSize: 22, fontWeight: '800' },
   reviewCard: { backgroundColor: '#F1F6FD', borderRadius: 19, padding: 18, marginTop: 19 },
   reviewEyebrow: { color: '#3879B9', fontWeight: '900', fontSize: 10, letterSpacing: 1.2 },
   reviewTitle: { color: NAVY, fontWeight: '900', fontSize: 19, marginTop: 12 },

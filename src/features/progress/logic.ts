@@ -9,6 +9,7 @@ export type StudentProgress = {
   lastStudiedAt: string | null;
   studyDays?: string[];
   vocabulary?: VocabularyMemory;
+  lastVocabularyReviewedAt?: string;
   pendingXpAwards?: PendingXpAward[];
   legacyXpBaseline?: number;
   legacyXpImported?: boolean;
@@ -54,6 +55,7 @@ export function isStudentProgress(value: unknown): value is StudentProgress {
   if (!valid) return false;
   if (v.studyDays !== undefined && (!Array.isArray(v.studyDays) || v.studyDays.some(day => !isStudyDay(day)))) return false;
   if (v.vocabulary !== undefined && !isVocabularyMemory(v.vocabulary)) return false;
+  if (v.lastVocabularyReviewedAt !== undefined && (typeof v.lastVocabularyReviewedAt !== 'string' || !Number.isFinite(Date.parse(v.lastVocabularyReviewedAt)))) return false;
   if (v.legacyXpBaseline !== undefined && (!Number.isSafeInteger(v.legacyXpBaseline) || v.legacyXpBaseline < 0)) return false;
   if (v.legacyXpImported !== undefined && typeof v.legacyXpImported !== 'boolean') return false;
   if (v.pendingXpAwards !== undefined && (!Array.isArray(v.pendingXpAwards) ||

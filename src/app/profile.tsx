@@ -45,12 +45,12 @@ export default function Profile() {
       <View style={styles.info}><Text style={styles.value}>{progress.completedLessonIds.length}</Text><Text style={styles.meta}>Lições concluídas</Text></View>
       <View style={styles.info}><Text style={styles.value}>{LESSONS.length}</Text><Text style={styles.meta}>Lições iniciais</Text></View>
     </View>
-    <VocabularyPanel memory={progress.vocabulary ?? {}} onReview={recordVocabulary} />
+    <VocabularyPanel memory={progress.vocabulary ?? {}} progress={progress} onReview={(words, correct) => recordVocabulary(words, correct, 'review')} />
     <View style={styles.account}>
       <Text style={styles.kicker}>MINHA CONTA</Text>
       <Text style={styles.accountTitle}>{user ? 'Conta conectada' : 'Aprendendo como visitante'}</Text>
       {user ? <>
-        <Text style={styles.email}>{user.email ?? 'Conta Firebase'}</Text>
+        <Text style={styles.email}>{user.email ?? 'Sua conta'}</Text>
         <Text style={styles.description}>{user.emailVerified ? 'E-mail confirmado.' : 'E-mail ainda não confirmado. Verifique sua caixa de entrada.'}</Text>
         {!user.emailVerified && <View style={styles.space}>
           <ActionButton title="Reenviar confirmação" secondary disabled={busy} onPress={() => {
@@ -61,7 +61,7 @@ export default function Profile() {
           <Text style={styles.noteTitle}>Sincronização entre aparelhos</Text>
           <Text accessibilityLiveRegion="polite" style={styles.description}>
             {syncStatus === 'syncing' ? 'Sincronizando lições e XP com a nuvem...' :
-             syncStatus === 'synced' ? 'Lições e XP sincronizados com a nuvem.' :
+             syncStatus === 'synced' ? 'Seu progresso está atualizado.' :
              syncStatus === 'error' ? 'Sem sincronização no momento. Suas lições permanecem salvas neste celular.' :
              'Aguardando sincronização de lições e XP.'}
           </Text>
@@ -69,7 +69,7 @@ export default function Profile() {
             <ActionButton title={syncStatus === 'syncing' ? 'Sincronizando...' : 'Sincronizar agora'}
               secondary disabled={syncStatus === 'syncing' || busy} onPress={() => { void syncNow(); }} />
           </View>
-          <Text style={styles.syncFoot}>Lições e XP são sincronizados com a conta. Recompensas offline ficam pendentes até a próxima conexão.</Text>
+          <Text style={styles.syncFoot}>Suas conquistas ficam disponíveis mesmo quando você estuda sem internet.</Text>
         </View>
         <View style={styles.space}>
           <ActionButton title={busy ? 'Aguarde...' : 'Sair da conta'} secondary disabled={busy} onPress={() => {
@@ -83,10 +83,10 @@ export default function Profile() {
       {!!notice && <Text style={styles.notice}>{notice}</Text>}
     </View>
     <View style={styles.note}>
-      <Text style={styles.noteTitle}>{user ? 'Progresso da conta salvo localmente' : 'Seu progresso de visitante está preservado'}</Text>
+      <Text style={styles.noteTitle}>{user ? 'Seu aprendizado, no seu ritmo' : 'Aprenda no seu ritmo'}</Text>
       <Text style={styles.noteText}>{user
-        ? 'Seu progresso e XP ficam salvos neste celular e sincronizam com o Cloudflare D1 ao conectar à internet.'
-        : 'Suas lições continuam no aparelho mesmo que você crie uma conta. Não transferimos o histórico de visitante automaticamente para evitar mistura de contas.'}</Text>
+        ? 'Suas lições e conquistas acompanham seu aprendizado.'
+        : 'Explore as lições, pratique diariamente e veja sua evolução.'}</Text>
     </View>
     <ActionButton title="Voltar às lições" onPress={() => router.replace('/')} />
   </ScrollView></Page>;
