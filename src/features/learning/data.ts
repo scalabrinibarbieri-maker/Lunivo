@@ -65,7 +65,7 @@ export const LESSONS: readonly Lesson[] = [
         { id: 'a', label: 'Um café, por favor' }, { id: 'b', label: 'Uma água, por favor' }, { id: 'c', label: 'A conta, por favor' }
       ], correctOptionId: 'a', explanation: '“Un caffè” normalmente indica um café expresso.' },
       { type: 'write', id: 'q12', instruction: 'Escreva em italiano', prompt: 'Água',
-        acceptedAnswers: ['acqua'], sampleAnswer: 'Acqua', explanation: '“Acqua” se escreve com duas letras c.' },
+        acceptedAnswers: ['acqua'], sampleAnswer: 'Acqua', explanation: '“Acqua” se escreve com C seguido de Q (CQ). A pronúncia é aproximadamente “ák-kua”.' },
       { type: 'choice', id: 'q13', instruction: 'Escolha a tradução', prompt: 'Il conto, per favore', options: [
         { id: 'a', label: 'O cardápio, por favor' }, { id: 'b', label: 'A conta, por favor' }, { id: 'c', label: 'Um chá, por favor' }
       ], correctOptionId: 'b', explanation: '“Il conto” significa a conta.' },
@@ -75,3 +75,19 @@ export const LESSONS: readonly Lesson[] = [
     ],
   }
 ];
+
+/** Curadoria dos exercícios embutidos; não há uma segunda cópia no motor de retenção.
+ * IDs e termos são estáveis para preservar o histórico de vocabulário no SQLite. */
+export const BUNDLED_VOCABULARY: Readonly<Record<string, ReadonlyArray<readonly [string, string]>>> = {
+  q00: [['Ciao', 'Olá / Tchau']],
+  q01: [['Ciao', 'Olá / Tchau']], q02: [['Buongiorno', 'Bom dia']],
+  q03: [['Grazie', 'Obrigado(a)']], q04: [['Per favore', 'Por favor']],
+  q05: [['Grazie', 'Obrigado(a)']], q06: [['Sì', 'Sim']],
+  q07: [['Come stai?', 'Como você está?']], q08: [['Sto bene', 'Estou bem']],
+  q09: [['E tu?', 'E você?']], q10: [['Mi chiamo', 'Meu nome é']],
+  q11: [['Un caffè', 'Um café']], q12: [['Acqua', 'Água']],
+  q13: [['Il conto', 'A conta']], q14: [['Quanto costa?', 'Quanto custa?']],
+  q15: [['Ciao', 'Olá / Tchau']], q16: [['Buongiorno', 'Bom dia']],
+  q17: [['Ciao', 'Olá / Tchau'], ['Buongiorno', 'Bom dia'], ['Grazie', 'Obrigado(a)']],
+  q18: [['Grazie', 'Obrigado(a)']],
+};

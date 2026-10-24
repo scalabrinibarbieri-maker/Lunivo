@@ -1,4 +1,5 @@
 import type { Exercise } from '../learning/types.ts';
+import { BUNDLED_VOCABULARY } from '../learning/data.ts';
 
 /** Palavras e expressões rastreadas por idioma. Nunca derivar a identidade do número da questão. */
 export type VocabularyWord = { id: string; term: string; meaning: string; language: string };
@@ -28,21 +29,6 @@ export function makeVocabularyWord(term: string, meaning: string, language = 'it
   return { id: `${language}:${normalize(safeTerm)}`, term: safeTerm, meaning: safeMeaning, language };
 }
 
-/** Vocabulário já publicado nas primeiras três lições: curadoria evita classificar português como italiano. */
-const BUNDLED: Record<string, ReadonlyArray<readonly [string, string]>> = {
-  q00: [['Ciao', 'Olá / Tchau']],
-  q01: [['Ciao', 'Olá / Tchau']], q02: [['Buongiorno', 'Bom dia']],
-  q03: [['Grazie', 'Obrigado(a)']], q04: [['Per favore', 'Por favor']],
-  q05: [['Grazie', 'Obrigado(a)']], q06: [['Sì', 'Sim']],
-  q07: [['Come stai?', 'Como você está?']], q08: [['Sto bene', 'Estou bem']],
-  q09: [['E tu?', 'E você?']], q10: [['Mi chiamo', 'Meu nome é']],
-  q11: [['Un caffè', 'Um café']], q12: [['Acqua', 'Água']],
-  q13: [['Il conto', 'A conta']], q14: [['Quanto costa?', 'Quanto custa?']],
-  q15: [['Ciao', 'Olá / Tchau']], q16: [['Buongiorno', 'Bom dia']],
-  q17: [['Ciao', 'Olá / Tchau'], ['Buongiorno', 'Bom dia'], ['Grazie', 'Obrigado(a)']],
-  q18: [['Grazie', 'Obrigado(a)']],
-};
-
 function generalCandidates(ex: Exercise): Array<readonly [string,string]> {
   if (ex.type === 'match') return ex.pairs.map(p => [p.left, p.right] as const);
   if (ex.type === 'write' && /italiano/i.test(ex.instruction)) return [[ex.sampleAnswer, ex.prompt]];
@@ -59,7 +45,7 @@ function generalCandidates(ex: Exercise): Array<readonly [string,string]> {
  * O conteúdo online pode ser aprimorado com mapeamentos editoriais sem tocar no mecanismo de retenção. */
 export function wordsForExercise(lessonId: string, ex: Exercise): VocabularyWord[] {
   const pairs = lessonId === 'it-a1-01' || lessonId === 'it-a1-02' || lessonId === 'it-a1-03'
-    ? (BUNDLED[ex.id] ?? []) : generalCandidates(ex);
+    ? (BUNDLED_VOCABULARY[ex.id] ?? []) : generalCandidates(ex);
   const result = new Map<string,VocabularyWord>();
   const language = lessonId.startsWith('en-') ? 'en-US' : lessonId.startsWith('es-') ? 'es-ES' : 'it-IT';
   for (const [term,meaning] of pairs) {

@@ -17,6 +17,6 @@ test('a ilustração do Ciao é um PNG nativo empacotado, sem base64', () => {
   const helper = readFileSync(new URL('../src/features/courses/localInfoImage.ts', import.meta.url), 'utf8');
   assert.match(source, /url: LOCAL_CIAO_IMAGE_URI/);
   assert.doesNotMatch(source, /data:image\/png;base64,/);
-  assert.match(source, /Ilustração de duas pessoas se cumprimentando/);
+  assert.match(source, /Arte ilustrativa da palavra Ciao em italiano/);
   assert.match(helper, /require\('\.\.\/\.\.\/\.\.\/assets\/lessons\/ciao-greeting\.png'\)/);
 });

@@ -51,7 +51,7 @@ function withLessonInfo(lesson: Lesson): Lesson {
           'Na Itália, “ciao” é muito mais do que um simples “oi”. A palavra costuma soar calorosa, próxima e informal — e serve tanto para cumprimentar quanto para se despedir. Entre amigos, familiares ou pessoas com quem o clima é leve, dizer “ciao” transmite naturalidade, simpatia e aquele toque de vida cotidiana italiana que parece espontâneo e elegante ao mesmo tempo.',
         image: {
           url: LOCAL_CIAO_IMAGE_URI,
-          alt: 'Ilustração de duas pessoas se cumprimentando com um aceno amigável.',
+          alt: 'Arte ilustrativa da palavra Ciao em italiano.',
           caption: '“Ciao” costuma aparecer em contextos leves, próximos e informais.',
         },
       },
